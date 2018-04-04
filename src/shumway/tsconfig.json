@@ -1,0 +1,9 @@
+{
+    "extends": "../tsconfig-parent.json",
+	"compilerOptions": {
+		"outFile": "../../dist/pixi-swf.js"
+	},
+	"include": [
+		"./references.ts"
+	]
+}

@@ -1,0 +1,26 @@
+{
+	"compilerOptions": {
+		"sourceMap": true,
+		"inlineSources": true,
+		"declaration": true,
+		"removeComments": false,
+		"target": "es5",
+		"lib": [
+			"DOM",
+			"ES5",
+			"ES2015.Collection",
+			"es2015.promise"
+		],
+		"module": "amd",
+		"noImplicitAny": true,
+		"noLib": false,
+		"preserveConstEnums": true,
+		"moduleResolution": "node",
+		"noFallthroughCasesInSwitch": false,
+		"noImplicitReturns": true,
+		"allowUnreachableCode": true,
+		"typeRoots": [
+			"node_modules/@types"
+		]
+	}
+}

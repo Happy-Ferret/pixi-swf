@@ -1,0 +1,11 @@
+{
+    "extends": "../tsconfig-parent.json",
+    "compilerOptions": {
+        "outFile": "../../dist/swf-viewer.js",
+        "noImplicitAny": false
+    },
+    "include": [
+        "./shuobject.ts",
+        "./transportPeer.ts"
+    ]
+}

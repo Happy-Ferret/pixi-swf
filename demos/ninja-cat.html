@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Shumway viewer</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #easelContainer {
+        position:fixed !important;
+        left:0;top:0;
+        overflow: hidden;
+      }
+  </style>
+  <script src="../src/compatibility.js"></script>
+  <script src="../dist/pixi-swf.js"></script>
+  <script src="../dist/swf-viewer.js"></script>
+</head>
+<body>
+   <!--<iframe id="gfxIframe" src="viewer.gfx.html"></iframe>-->
+   <div id="easelContainer"></div>
+   <script src="../src/viewer.js"></script>
+   <script src="./ninja-cat.js"></script>
+</body>
+</html>

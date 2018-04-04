@@ -7591,6 +7591,7 @@ var Shumway;
                 function LegacyClass(jsClass) {
                     var _this = _super.call(this) || this;
                     _this.key = null;
+                    _this.multiname = null;
                     _this.jsClass = jsClass;
                     return _this;
                 }
@@ -7641,7 +7642,7 @@ var Shumway;
                     return this === symbolClass;
                 };
                 LegacyClass.prototype.isSymbolPrototype = function (symbolClass) {
-                    return this.jsClass.prototype.isPrototypeOf(symbolClass.jsClass.jsClass);
+                    return this.jsClass.prototype.isPrototypeOf(symbolClass.jsClass);
                 };
                 LegacyClass.prototype.FromUntyped = function (obj) {
                     return null;
@@ -19426,12 +19427,15 @@ var Shumway;
             }
             lang.registerNativeFunction = registerNativeFunction;
             function createLegacyClass(name, proto) {
-                function symbolClass() {
+                var symbolClass = function () {
                     proto.jsClass.apply(this, arguments);
-                }
+                };
+                symbolClass.multiname = name;
+                LegacyClass.call(symbolClass, symbolClass);
+                Object.assign(symbolClass, LegacyClass.prototype);
                 symbolClass.prototype = Object.create(proto.jsClass.prototype);
                 symbolClass.prototype.constructor = symbolClass;
-                return new LegacyClass(symbolClass);
+                return symbolClass;
             }
             lang.createLegacyClass = createLegacyClass;
             function getNativeClass(name) {
@@ -19733,7 +19737,8 @@ var Shumway;
             this._wordWrap = false;
             this._scrollV = 1;
             this._scrollH = 0;
-            this.flags = 0 /* None */;
+            //this.flags = TextContentFlags.None;
+            this.flags = 2 /* DirtyContent */;
             this.defaultTextFormat = defaultTextFormat || sec.text.TextFormat.create();
             this.textRuns = [];
             this.textRunData = new DataBuffer();
@@ -20125,6 +20130,7 @@ var Shumway;
             this._plainText = plainText + newText;
             this.textRuns.push(newRun);
             this._writeTextRun(newRun);
+            this.flags |= 2 /* DirtyContent */;
         };
         TextContent.prototype.prependText = function (newText, format) {
             if (!format) {
@@ -24870,6 +24876,10 @@ var Shumway;
                  */
                 DisplayObjectFlags[DisplayObjectFlags["DirtyDescendents"] = 536870912] = "DirtyDescendents";
                 /**
+                 * Used for serialization of layers
+                 */
+                DisplayObjectFlags[DisplayObjectFlags["DirtyParents"] = 1073741824] = "DirtyParents";
+                /**
                  * Masks flags that need to be propagated up when this display object gets added to a parent.
                  */
                 DisplayObjectFlags[DisplayObjectFlags["Bubbling"] = 536920064] = "Bubbling";
@@ -25483,8 +25493,8 @@ var Shumway;
                  */
                 DisplayObject.prototype._animate = function (placeObjectTag) {
                     release || assert(this._hasFlags(4096 /* AnimatedByTimeline */));
-                    var reset = !(placeObjectTag.flags & 1 /* Move */) &&
-                        placeObjectTag.flags & 2 /* HasCharacter */;
+                    var reset = (placeObjectTag.flags & 1 /* Move */) === 0 &&
+                        (placeObjectTag.flags & 2 /* HasCharacter */) !== 0;
                     var matrixClass = this._sec.geom;
                     if (placeObjectTag.flags & 4 /* HasMatrix */) {
                         matrixClass.TEMP_MATRIX.copyFromUntyped(placeObjectTag.matrix);
@@ -27195,7 +27205,8 @@ var Shumway;
                     var result = target._containsGlobalPoint(globalX, globalY, testingType, objects);
                     target._parent = null;
                     // For mouse target finding, SimpleButtons always return themselves as the hit.
-                    if (result !== 0 /* None */ && testingType === 3 /* Mouse */ &&
+                    /*@ivanpopelyshev: result !== HitTestingResult.NONE, why? */
+                    if (result === 2 /* Shape */ && testingType === 3 /* Mouse */ &&
                         objects && this._mouseEnabled) {
                         objects[0] = this;
                         release || assert(objects.length === 1);
@@ -27247,6 +27258,7 @@ var Shumway;
                     else {
                         this._children.length = 0;
                     }
+                    this._setFlags(536870912 /* DirtyDescendents */);
                     this._setDirtyFlags(2 /* DirtyChildren */);
                     this._invalidateFillAndLineBounds(true, true);
                 };
@@ -42942,6 +42954,7 @@ var Shumway;
         var system;
         (function (system) {
             var notImplemented = Shumway.Debug.notImplemented;
+            var Multiname = Shumway.flash.lang.Multiname;
             var ApplicationDomain = /** @class */ (function (_super) {
                 __extends(ApplicationDomain, _super);
                 function ApplicationDomain(parentDomain) {
@@ -42950,7 +42963,6 @@ var Shumway;
                     _this._classes = [];
                     // @ivanpopelyshev instead of currentABC
                     _this.url = location.href;
-                    release || Shumway.Debug.assert(!(_this instanceof ApplicationDomain));
                     // this.parentDomain = parentDomain || this._sec.;
                     if (parentDomain) {
                         _this._parentDomain = parentDomain;
@@ -43036,9 +43048,9 @@ var Shumway;
                     // if (!name) {
                     // 	this.sec.throwError('TypeError', Errors.NullPointerError, 'definitionName');
                     // }
-                    // let simpleName = name.replace("::", ".");
-                    // let mn = Multiname.FromFQNString(simpleName, NamespaceType.Public);
-                    // return this.axDomain.getProperty(mn, false, false);
+                    var simpleName = name.replace("::", ".");
+                    var mn = Multiname.FromFQNString(simpleName, 0 /* Public */);
+                    return this.getClass(mn);
                 };
                 ApplicationDomain.prototype.getQualifiedDefinitionNames = function () {
                     release || notImplemented("public flash.system.ApplicationDomain::getQualifiedDefinitionNames");
@@ -44351,6 +44363,12 @@ var Shumway;
                     this._initializeFields();
                     this._setStaticContentFromSymbol(this._symbol);
                 };
+                StaticText.prototype.preInit = function () {
+                    if (this._symbol && !this._fieldsInitialized) {
+                        this.applySymbol();
+                    }
+                    _super.prototype.preInit.call(this);
+                };
                 StaticText.prototype._canHaveTextContent = function () {
                     return true;
                 };
@@ -44720,6 +44738,12 @@ var Shumway;
                     this.wordWrap = symbol.wordWrap;
                     this.autoSize = symbol.autoSize;
                 };
+                TextField.prototype.preInit = function () {
+                    if (this._symbol && !this._fieldsInitialized) {
+                        this.applySymbol();
+                    }
+                    _super.prototype.preInit.call(this);
+                };
                 TextField.prototype._initializeFields = function () {
                     _super.prototype._initializeFields.call(this);
                     this._alwaysShowSelection = false;
@@ -44801,7 +44825,7 @@ var Shumway;
                     return true;
                 };
                 TextField.prototype._invalidateContent = function () {
-                    if (this._textContent.flags & 15 /* Dirty */) {
+                    if ((this._textContent.flags & 15 /* Dirty */) !== 0) {
                         this._setDirtyFlags(8 /* DirtyTextContent */);
                     }
                 };
@@ -51687,6 +51711,8 @@ var Shumway;
                                 return this._currentTransform || (this._currentTransform = GFX.Geometry.Matrix.createIdentitySVGMatrix());
                             }
                         });
+                        //@ivanpopelyshev: this polyfill breaks everything. Do not use it!
+                        //hasCurrentTransform = true;
                     }
                 }
                 function mozPolyfillCurrentTransform() {
@@ -54792,10 +54818,10 @@ var Shumway;
                 },
                 set: function (value) {
                     this._filters = value;
-                    if (value.length) {
-                        // TODO: We could avoid invalidating the node if the new filter list contains equal filter objects.
-                        this._node.invalidate();
-                    }
+                    // if (value.length !== this._filters.length) {
+                    // TODO: We could avoid invalidating the node if the new filter list contains equal filter objects.
+                    this._node.invalidate();
+                    // }
                 },
                 enumerable: true,
                 configurable: true
@@ -55260,7 +55286,7 @@ var Shumway;
              * If specified, the rectangular |cullBounds| can be used to cull parts of the shape for better performance.
              * If |paintStencil| is |true| then we must not create any alpha values, and also not paint any strokes.
              */
-            Renderable.prototype.render = function (context, ratio, cullBounds, clipPath, paintStencil) {
+            Renderable.prototype.render = function (context, ratio, cullBounds, clipPath, paintStencil, fillAdditive) {
             };
             return Renderable;
         }(GFX.Node));
@@ -55721,6 +55747,7 @@ var Shumway;
                 this.smoothImage = smoothImage;
                 this.strokeProperties = strokeProperties;
                 this.path = new Path2D();
+                this.shareBorder = false;
                 release || assert((type === 1 /* Stroke */ ||
                     type === 2 /* StrokeFill */) === !!strokeProperties);
             }
@@ -55746,6 +55773,23 @@ var Shumway;
                 morph(start >> 16 & 0xff, end >> 16 & 0xff, ratio) << 16 |
                 morph(start >> 8 & 0xff, end >> 8 & 0xff, ratio) << 8 |
                 morph(start & 0xff, end & 0xff, ratio);
+        }
+        var tempCoordinateMap = {};
+        function clearPointMap() {
+            tempCoordinateMap = {};
+        }
+        function checkPointMap(x, y, newVal) {
+            var key = x + "#" + y;
+            var val = tempCoordinateMap[key];
+            if (val === undefined) {
+                tempCoordinateMap[key] = newVal;
+                return false;
+            }
+            if (val === newVal) {
+                return false;
+            }
+            tempCoordinateMap[key] = newVal;
+            return true;
         }
         var RenderableShape = /** @class */ (function (_super) {
             __extends(RenderableShape, _super);
@@ -55780,12 +55824,13 @@ var Shumway;
              * If |paintStencil| is |true| then we must not create any alpha values, and also not paint
              * any strokes.
              */
-            RenderableShape.prototype.render = function (context, ratio, cullBounds, clipPath, paintStencil) {
+            RenderableShape.prototype.render = function (context, ratio, cullBounds, clipPath, paintStencil, fillAdditive) {
                 if (clipPath === void 0) { clipPath = null; }
                 if (paintStencil === void 0) { paintStencil = false; }
+                if (fillAdditive === void 0) { fillAdditive = false; }
                 var paintStencilStyle = release ? '#000000' : '#FF4981';
                 context.fillStyle = context.strokeStyle = 'transparent';
-                var paths = this._deserializePaths(this._pathData, context, ratio);
+                var paths = this._deserializePaths(this._pathData, context, ratio, fillAdditive);
                 release || assert(paths);
                 GFX.enterTimeline("RenderableShape.render", this);
                 for (var i = 0; i < paths.length; i++) {
@@ -55798,9 +55843,15 @@ var Shumway;
                             clipPath.addPath(path.path, context.currentTransform);
                         }
                         else {
+                            if (fillAdditive && path.shareBorder) {
+                                context.globalCompositeOperation = 'lighter';
+                            }
                             context.fillStyle = paintStencil ? paintStencilStyle : path.style;
                             context.fill(path.path, 'evenodd');
                             context.fillStyle = 'transparent';
+                            if (fillAdditive && path.shareBorder) {
+                                context.globalCompositeOperation = 'source-over';
+                            }
                         }
                     }
                     else if (!clipPath && !paintStencil) {
@@ -55834,9 +55885,10 @@ var Shumway;
                         context.strokeStyle = 'transparent';
                     }
                 }
+                context.globalCompositeOperation = 'source-over';
                 GFX.leaveTimeline("RenderableShape.render");
             };
-            RenderableShape.prototype._deserializePaths = function (data, context, ratio) {
+            RenderableShape.prototype._deserializePaths = function (data, context, ratio, checkBorder) {
                 release || assert(data ? !this._paths : this._paths);
                 GFX.enterTimeline("RenderableShape.deserializePaths");
                 // TODO: Optimize path handling to use only one path if possible.
@@ -55847,7 +55899,12 @@ var Shumway;
                 }
                 var paths = this._paths = [];
                 var fillPath = null;
+                var fillStyled = null;
                 var strokePath = null;
+                var fillNumber = 0;
+                if (checkBorder) {
+                    clearPointMap();
+                }
                 // We have to alway store the last position because Flash keeps the drawing cursor where it
                 // was when changing fill or line style, whereas Canvas forgets it on beginning a new path.
                 var x = 0;
@@ -55867,6 +55924,8 @@ var Shumway;
                 var commandIndex;
                 for (commandIndex = 0; commandIndex < commandsCount; commandIndex++) {
                     var command = commands[commandIndex];
+                    var readX = 0;
+                    var readY = 0;
                     switch (command) {
                         case 9 /* MoveTo */:
                             release || assert(coordinatesIndex <= data.coordinatesPosition - 2);
@@ -55875,15 +55934,19 @@ var Shumway;
                                 strokePath && strokePath.lineTo(formOpenX, formOpenY);
                             }
                             formOpen = true;
-                            x = formOpenX = coordinates[coordinatesIndex++] / 20;
-                            y = formOpenY = coordinates[coordinatesIndex++] / 20;
+                            readX = coordinates[coordinatesIndex++];
+                            readY = coordinates[coordinatesIndex++];
+                            x = formOpenX = readX / 20;
+                            y = formOpenY = readY / 20;
                             fillPath && fillPath.moveTo(x, y);
                             strokePath && strokePath.moveTo(x, y);
                             break;
                         case 10 /* LineTo */:
                             release || assert(coordinatesIndex <= data.coordinatesPosition - 2);
-                            x = coordinates[coordinatesIndex++] / 20;
-                            y = coordinates[coordinatesIndex++] / 20;
+                            readX = coordinates[coordinatesIndex++];
+                            readY = coordinates[coordinatesIndex++];
+                            x = readX / 20;
+                            y = readY / 20;
                             fillPath && fillPath.lineTo(x, y);
                             strokePath && strokePath.lineTo(x, y);
                             break;
@@ -55891,8 +55954,10 @@ var Shumway;
                             release || assert(coordinatesIndex <= data.coordinatesPosition - 4);
                             cpX = coordinates[coordinatesIndex++] / 20;
                             cpY = coordinates[coordinatesIndex++] / 20;
-                            x = coordinates[coordinatesIndex++] / 20;
-                            y = coordinates[coordinatesIndex++] / 20;
+                            readX = coordinates[coordinatesIndex++];
+                            readY = coordinates[coordinatesIndex++];
+                            x = readX / 20;
+                            y = readY / 20;
                             fillPath && fillPath.quadraticCurveTo(cpX, cpY, x, y);
                             strokePath && strokePath.quadraticCurveTo(cpX, cpY, x, y);
                             break;
@@ -55902,21 +55967,29 @@ var Shumway;
                             cpY = coordinates[coordinatesIndex++] / 20;
                             var cpX2 = coordinates[coordinatesIndex++] / 20;
                             var cpY2 = coordinates[coordinatesIndex++] / 20;
-                            x = coordinates[coordinatesIndex++] / 20;
-                            y = coordinates[coordinatesIndex++] / 20;
+                            readX = coordinates[coordinatesIndex++];
+                            readY = coordinates[coordinatesIndex++];
+                            x = readX / 20;
+                            y = readY / 20;
                             fillPath && fillPath.bezierCurveTo(cpX, cpY, cpX2, cpY2, x, y);
                             strokePath && strokePath.bezierCurveTo(cpX, cpY, cpX2, cpY2, x, y);
                             break;
                         case 1 /* BeginSolidFill */:
                             release || assert(styles.bytesAvailable >= 4);
-                            fillPath = this._createPath(0 /* Fill */, Shumway.ColorUtilities.rgbaToCSSStyle(styles.readUnsignedInt()), false, null, x, y);
+                            fillStyled = this._createPath(0 /* Fill */, Shumway.ColorUtilities.rgbaToCSSStyle(styles.readUnsignedInt()), false, null, x, y);
+                            fillPath = fillStyled.path;
+                            fillNumber++;
                             break;
                         case 3 /* BeginBitmapFill */:
                             var bitmapStyle = this._readBitmap(styles, context);
-                            fillPath = this._createPath(0 /* Fill */, bitmapStyle.style, bitmapStyle.smoothImage, null, x, y);
+                            fillStyled = this._createPath(0 /* Fill */, bitmapStyle.style, bitmapStyle.smoothImage, null, x, y);
+                            fillPath = fillStyled.path;
+                            fillNumber++;
                             break;
                         case 2 /* BeginGradientFill */:
-                            fillPath = this._createPath(0 /* Fill */, this._readGradient(styles, context), false, null, x, y);
+                            fillStyled = this._createPath(0 /* Fill */, this._readGradient(styles, context), false, null, x, y);
+                            fillPath = fillStyled.path;
+                            fillNumber++;
                             break;
                         case 4 /* EndFill */:
                             fillPath = null;
@@ -55932,15 +56005,15 @@ var Shumway;
                             // Look ahead at the following command to determine if this is a complex stroke style.
                             if (commands[commandIndex + 1] === 6 /* LineStyleGradient */) {
                                 commandIndex++;
-                                strokePath = this._createPath(2 /* StrokeFill */, this._readGradient(styles, context), false, strokeProperties, x, y);
+                                strokePath = this._createPath(2 /* StrokeFill */, this._readGradient(styles, context), false, strokeProperties, x, y).path;
                             }
                             else if (commands[commandIndex + 1] === 6 /* LineStyleGradient */) {
                                 commandIndex++;
                                 var bitmapStyle_1 = this._readBitmap(styles, context);
-                                strokePath = this._createPath(2 /* StrokeFill */, bitmapStyle_1.style, bitmapStyle_1.smoothImage, strokeProperties, x, y);
+                                strokePath = this._createPath(2 /* StrokeFill */, bitmapStyle_1.style, bitmapStyle_1.smoothImage, strokeProperties, x, y).path;
                             }
                             else {
-                                strokePath = this._createPath(1 /* Stroke */, color, false, strokeProperties, x, y);
+                                strokePath = this._createPath(1 /* Stroke */, color, false, strokeProperties, x, y).path;
                             }
                             break;
                         case 8 /* LineEnd */:
@@ -55949,6 +56022,11 @@ var Shumway;
                         default:
                             release || assertUnreachable('Invalid command ' + command + ' encountered at index' +
                                 commandIndex + ' of ' + commandsCount);
+                    }
+                    if (fillPath && readX && readY) {
+                        if (!strokePath && checkBorder) {
+                            fillStyled.shareBorder = checkPointMap(readX, readY, fillNumber) || fillStyled.shareBorder;
+                        }
                     }
                 }
                 release || assert(styles.bytesAvailable === 0);
@@ -55966,7 +56044,7 @@ var Shumway;
                 var path = new StyledPath(type, style, smoothImage, strokeProperties);
                 this._paths.push(path);
                 path.path.moveTo(x, y);
-                return path.path;
+                return path;
             };
             RenderableShape.prototype._readMatrix = function (data) {
                 return new Matrix(data.readFloat(), data.readFloat(), data.readFloat(), data.readFloat(), data.readFloat(), data.readFloat());
@@ -57474,7 +57552,6 @@ var Shumway;
                         sx = source.region.x;
                         sy = source.region.y;
                     }
-                    var canvas = this.context.canvas;
                     var clip = blendModeShouldClip(blendMode);
                     if (clip) {
                         this.context.save();
@@ -57483,7 +57560,7 @@ var Shumway;
                         this.context.clip();
                     }
                     this.context.globalAlpha = 1;
-                    this.context.globalCompositeOperation = getCompositeOperation(blendMode);
+                    this.context.globalCompositeOperation = getCompositeOperation(GFX.BlendMode.Normal);
                     if (filters) {
                         if (colorMatrix && !colorMatrix.isIdentity()) {
                             filters = filters.concat(colorMatrix);
@@ -57499,6 +57576,8 @@ var Shumway;
                                 _cc = copyContext;
                                 copyContext = sourceContext;
                                 sourceContext = _cc;
+                                dx = source.region.x;
+                                dy = source.region.y;
                             }
                             else {
                                 Canvas2DSurfaceRegion._ensureCopyCanvasSize(w, h);
@@ -57507,7 +57586,7 @@ var Shumway;
                                 dy = 0;
                             }
                             for (; i < filters.length - 1; i++) {
-                                copyContext.clearRect(0, 0, w, h);
+                                copyContext.clearRect(dx, dy, w, h);
                                 Filters._applyFilter(devicePixelRatio, copyContext, filters[i]);
                                 copyContext.drawImage(sourceContext.canvas, sx, sy, w, h, dx, dy, w, h);
                                 Filters._removeFilter(copyContext);
@@ -57526,6 +57605,7 @@ var Shumway;
                         }
                         Filters._applyFilter(devicePixelRatio, this.context, filters[i]);
                     }
+                    this.context.globalCompositeOperation = getCompositeOperation(blendMode);
                     this.context.drawImage(sourceContext.canvas, sx, sy, w, h, x, y, w, h);
                     this.context.globalCompositeOperation = getCompositeOperation(GFX.BlendMode.Normal);
                     Filters._removeFilter(this.context);
@@ -57564,11 +57644,80 @@ var Shumway;
                     }
                     context.clearRect(rectangle.x, rectangle.y, rectangle.w, rectangle.h);
                 };
+                Canvas2DSurfaceRegion.prototype.enterClip = function (rect) {
+                    this.surface.enterClip(this, rect);
+                };
+                Canvas2DSurfaceRegion.prototype.exitClip = function () {
+                    this.surface.exitClip();
+                };
                 return Canvas2DSurfaceRegion;
             }());
             Canvas2D.Canvas2DSurfaceRegion = Canvas2DSurfaceRegion;
+            //surface clip!
+            var SurfaceClipState = /** @class */ (function () {
+                function SurfaceClipState() {
+                    this.rect = null;
+                    this.states = [];
+                }
+                SurfaceClipState.prototype.enter = function () {
+                    var context = this.target.surface.context;
+                    context.save();
+                    this.target.reset();
+                    if (this.rect) {
+                        context.save();
+                        context.beginPath();
+                        context.rect(this.rect.x, this.rect.y, this.rect.w, this.rect.h);
+                        context.clip();
+                    }
+                    for (var i = 0; i < this.states.length; i++) {
+                        context.save();
+                        this.states[i].applyClipPath();
+                    }
+                };
+                SurfaceClipState.prototype.leave = function () {
+                    var context = this.target.surface.context;
+                    for (var i = 0; i < this.states.length; i++) {
+                        context.restore();
+                    }
+                    if (this.rect) {
+                        context.restore();
+                    }
+                    context.restore();
+                };
+                SurfaceClipState.prototype.applyClipPath = function (state) {
+                    var context = this.target.surface.context;
+                    context.save();
+                    this.states.push(state);
+                    state.applyClipPath();
+                };
+                SurfaceClipState.prototype.closeClipPath = function () {
+                    var context = this.target.surface.context;
+                    context.restore();
+                    this.states.pop();
+                };
+                SurfaceClipState.prototype.startClipRect = function (rect) {
+                    var context = this.target.surface.context;
+                    this.rect = rect;
+                    context.save();
+                    context.beginPath();
+                    context.rect(this.rect.x, this.rect.y, this.rect.w, this.rect.h);
+                    context.clip();
+                };
+                SurfaceClipState.prototype.finishClipRect = function () {
+                    var context = this.target.surface.context;
+                    this.rect = null;
+                    context.restore();
+                };
+                return SurfaceClipState;
+            }());
+            Canvas2D.SurfaceClipState = SurfaceClipState;
             var Canvas2DSurface = /** @class */ (function () {
                 function Canvas2DSurface(canvas, regionAllocator) {
+                    /**
+                     * CLIP STACK STATE !@#$ YOU CANVAS2D
+                     */
+                    this.clipStates = [];
+                    this.clipStateNum = -1;
                     this.canvas = canvas;
                     this.context = canvas.getContext("2d");
                     this.w = canvas.width;
@@ -57585,6 +57734,41 @@ var Shumway;
                 Canvas2DSurface.prototype.free = function (surfaceRegion) {
                     this._regionAllocator.free(surfaceRegion.region);
                 };
+                Canvas2DSurface.prototype.enterClip = function (region, rect) {
+                    var stack = this.clipStates;
+                    if (this.clipStateNum >= 0) {
+                        stack[this.clipStateNum].leave();
+                    }
+                    this.clipStateNum++;
+                    if (this.clipStateNum >= stack.length) {
+                        stack.push(new SurfaceClipState());
+                    }
+                    var elem = stack[this.clipStateNum];
+                    elem.target = region;
+                    elem.rect = rect;
+                    elem.enter();
+                };
+                Canvas2DSurface.prototype.exitClip = function () {
+                    var stack = this.clipStates;
+                    var elem = stack[this.clipStateNum];
+                    elem.leave();
+                    elem.rect = null;
+                    elem.target = null;
+                    this.clipStateNum--;
+                    if (this.clipStateNum >= 0) {
+                        stack[this.clipStateNum].enter();
+                    }
+                };
+                Canvas2DSurface.prototype.applyClipPath = function (state) {
+                    var stack = this.clipStates;
+                    var elem = stack[this.clipStateNum];
+                    elem.applyClipPath(state);
+                };
+                Canvas2DSurface.prototype.closeClipPath = function () {
+                    var stack = this.clipStates;
+                    var elem = stack[this.clipStateNum];
+                    elem.closeClipPath();
+                };
                 return Canvas2DSurface;
             }());
             Canvas2D.Canvas2DSurface = Canvas2DSurface;
@@ -57592,6 +57776,15 @@ var Shumway;
     })(GFX = Shumway.GFX || (Shumway.GFX = {}));
 })(Shumway || (Shumway = {}));
 var Shumway;
+(function (Shumway) {
+    var GFX;
+    (function (GFX) {
+        GFX.PERF_SHAPE_MS = 1000000;
+        GFX.PERF_LAYER_MS = 1000000;
+        GFX.PERF_SHOW_SLOW = false;
+        GFX.ENABLE_LAYERS_CACHE = true;
+    })(GFX = Shumway.GFX || (Shumway.GFX = {}));
+})(Shumway || (Shumway = {}));
 (function (Shumway) {
     var GFX;
     (function (GFX) {
@@ -57641,24 +57834,18 @@ var Shumway;
                         var scaledBounds = bounds.clone();
                         scaledBounds.scale(scale, scale);
                         scaledBounds.snap();
-                        var surfaceRegion = this._surfaceRegionAllocator.allocate(scaledBounds.w, scaledBounds.h, null);
+                        var surfaceRegion = this._surfaceRegionAllocator.allocate(scaledBounds.w + 2, scaledBounds.h + 2, null);
                         // surfaceRegion.fill(ColorStyle.randomStyle());
                         var region = surfaceRegion.region;
                         mipLevel = this._levels[levelIndex] = new MipMapLevel(surfaceRegion, scale);
-                        var surface = (mipLevel.surfaceRegion.surface);
-                        var context = surface.context;
-                        //        context.save();
-                        //        context.beginPath();
-                        //        context.rect(region.x, region.y, region.w, region.h);
-                        //        context.clip();
-                        //        context.setTransform(scale, 0, 0, scale, region.x - scaledBounds.x, region.y - scaledBounds.y);
+                        surfaceRegion.enterClip(region);
                         var state = new RenderState(surfaceRegion);
                         state.clip.set(region);
-                        state.matrix.setElements(scale, 0, 0, scale, region.x - scaledBounds.x, region.y - scaledBounds.y);
-                        state.flags |= 64 /* IgnoreNextRenderWithCache */;
+                        state.matrix.setElements(scale, 0, 0, scale, region.x + 1 - scaledBounds.x, region.y + 1 - scaledBounds.y);
+                        state.flags |= 64 /* IgnoreNextRenderWithCache */ | 16384 /* FillAdditive */;
                         this._renderer.renderNodeWithState(this._node, state);
                         state.free();
-                        // context.restore();
+                        surfaceRegion.exitClip();
                     }
                     return mipLevel;
                 };
@@ -57703,6 +57890,10 @@ var Shumway;
                      */
                     _this.cacheShapes = false;
                     /**
+                     * Turn off slow shapes
+                     */
+                    _this.perfRender = true;
+                    /**
                      * Shapes above this size are not cached.
                      */
                     _this.cacheShapesMaxSize = 256;
@@ -57735,6 +57926,8 @@ var Shumway;
                 RenderFlags[RenderFlags["PaintDirtyRegion"] = 2048] = "PaintDirtyRegion";
                 RenderFlags[RenderFlags["ImageSmoothing"] = 4096] = "ImageSmoothing";
                 RenderFlags[RenderFlags["PixelSnapping"] = 8192] = "PixelSnapping";
+                RenderFlags[RenderFlags["FillAdditive"] = 16384] = "FillAdditive";
+                RenderFlags[RenderFlags["PerfRender"] = 32768] = "PerfRender";
             })(RenderFlags = Canvas2D.RenderFlags || (Canvas2D.RenderFlags = {}));
             var MAX_VIEWPORT = Rectangle.createMaxI16();
             /**
@@ -57869,7 +58062,12 @@ var Shumway;
                     if (options === void 0) { options = new Canvas2DRendererOptions(); }
                     var _this = _super.call(this, container, stage, options) || this;
                     _this._visited = 0;
+                    /**
+                     * stores current number of frame
+                     */
+                    _this.frameCounter = 0;
                     _this._frameInfo = new FrameInfo();
+                    _this._allocatedLayers = [];
                     _this._fontSize = 0;
                     /**
                      * Stack of rendering layers. Stage video lives at the bottom of this stack.
@@ -57988,12 +58186,13 @@ var Shumway;
                     var options = this._options;
                     var viewport = this._viewport;
                     // stage.visit(new TracingNodeVisitor(new IndentingWriter()), null);
-                    target.reset();
                     target.context.save();
-                    target.context.beginPath();
-                    target.context.rect(viewport.x, viewport.y, viewport.w, viewport.h);
-                    target.context.clip();
+                    target.reset();
+                    target.enterClip(viewport);
+                    this.frameCounter++;
                     this._renderStageToTarget(target, stage, viewport);
+                    target.exitClip();
+                    this.gc();
                     target.reset();
                     if (options.paintViewport) {
                         target.context.beginPath();
@@ -58003,6 +58202,21 @@ var Shumway;
                         target.context.stroke();
                     }
                     target.context.restore();
+                };
+                Canvas2DRenderer.prototype.gc = function () {
+                    var all = this._allocatedLayers;
+                    var j = 0;
+                    for (var i = 0; i < all.length; i++) {
+                        var node = all[i];
+                        if (node.properties['cacheSurface'] && all[i].renderID === this.frameCounter) {
+                            all[j++] = node;
+                        }
+                        else {
+                            node.properties['cacheSurface'].free();
+                            node.properties['cacheSurface'] = null;
+                        }
+                    }
+                    all.length = j;
                 };
                 Canvas2DRenderer.prototype.renderNode = function (node, clip, matrix) {
                     var state = new RenderState(this._target);
@@ -58049,8 +58263,10 @@ var Shumway;
                     if (mipMapLevel) {
                         var context = state.target.context;
                         context.imageSmoothingEnabled = context.mozImageSmoothingEnabled = true;
+                        context.globalAlpha = 1;
+                        context.globalCompositeOperation = 'source-over';
                         context.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
-                        context.drawImage(mipMapLevelSurfaceRegion.surface.canvas, region.x, region.y, region.w, region.h, bounds.x, bounds.y, bounds.w, bounds.h);
+                        context.drawImage(mipMapLevelSurfaceRegion.surface.canvas, region.x + 1, region.y + 1, region.w - 2, region.h - 2, bounds.x, bounds.y, bounds.w, bounds.h);
                         return true;
                     }
                     return false;
@@ -58091,7 +58307,7 @@ var Shumway;
                         state = state.clone();
                         state.flags |= 1 /* IgnoreNextLayer */;
                         state.clipList = [];
-                        this._renderLayer(node, state);
+                        this._renderLayerWithCache(node, state);
                         state.free();
                     }
                     else {
@@ -58269,28 +58485,45 @@ var Shumway;
                     var videoLayer = this._backgroundVideoLayer;
                     if (videoLayer !== node.video.parentElement) {
                         videoLayer.appendChild(node.video);
-                        node.addEventListener(2 /* RemovedFromStage */, function removeVideo(node) {
+                        var removeVideo_1 = function (node /*RenderableVideo*/) {
                             release || assert(videoLayer === node.video.parentElement);
                             videoLayer.removeChild(node.video);
-                            node.removeEventListener(2 /* RemovedFromStage */, removeVideo);
-                        });
+                            node.removeEventListener(2 /* RemovedFromStage */, removeVideo_1);
+                        };
+                        node.addEventListener(2 /* RemovedFromStage */, removeVideo_1);
                     }
                     matrix.free();
                 };
                 Canvas2DRenderer.prototype.visitRenderable = function (node, state, ratio) {
                     var bounds = node.getBounds();
+                    if (node.properties['slow'] && !GFX.PERF_SHOW_SLOW ||
+                        !node.properties['slow'] && GFX.PERF_SHOW_SLOW) {
+                        return;
+                    }
                     if (state.flags & 32 /* IgnoreRenderable */) {
                         return;
                     }
                     if (bounds.isEmpty()) {
                         return;
                     }
+                    var perfRender = !release && !!(state.flags & 32768 /* PerfRender */);
+                    var paintStart = 0;
                     if (state.hasFlags(64 /* IgnoreNextRenderWithCache */)) {
                         state.removeFlags(64 /* IgnoreNextRenderWithCache */);
                     }
                     else {
-                        if (this._renderWithCache(node, state)) {
+                        if (perfRender) {
+                            paintStart = performance.now();
+                        }
+                        var isCached = this._renderWithCache(node, state);
+                        if (isCached) {
                             return;
+                        }
+                        if (perfRender) {
+                            var elapsed = performance.now() - paintStart;
+                            if (elapsed > GFX.PERF_SHAPE_MS) {
+                                this.markSlowNode(node, state, elapsed);
+                            }
                         }
                     }
                     var matrix = state.matrix;
@@ -58299,8 +58532,7 @@ var Shumway;
                     var paintStencil = !!(state.flags & 8 /* PaintStencil */);
                     var paintFlashing = !release && !!(state.flags & 512 /* PaintFlashing */);
                     context.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
-                    var paintStart = 0;
-                    if (paintFlashing) {
+                    if (paintFlashing || perfRender) {
                         paintStart = performance.now();
                     }
                     this._frameInfo.shapes++;
@@ -58308,13 +58540,24 @@ var Shumway;
                     var renderCount = node.properties["renderCount"] || 0;
                     var cacheShapesMaxSize = this._options.cacheShapesMaxSize;
                     node.properties["renderCount"] = ++renderCount;
-                    node.render(context, ratio, null, paintClip ? state.clipPath : null, paintStencil);
-                    if (paintFlashing) {
+                    var additive = state.hasFlags(16384 /* FillAdditive */);
+                    node.render(context, ratio, null, paintClip ? state.clipPath : null, paintStencil, additive);
+                    if (paintFlashing || perfRender) {
                         var elapsed = performance.now() - paintStart;
-                        context.fillStyle = Shumway.ColorStyle.gradientColor(0.1 / elapsed);
-                        context.globalAlpha = 0.3 + 0.1 * Math.random();
-                        context.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+                        if (elapsed > GFX.PERF_SHAPE_MS) {
+                            this.markSlowNode(node, state, elapsed);
+                        }
+                        if (paintFlashing) {
+                            context.fillStyle = Shumway.ColorStyle.gradientColor(0.1 / elapsed);
+                            context.globalAlpha = 0.3 + 0.1 * Math.random();
+                            context.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+                        }
                     }
+                };
+                Canvas2DRenderer.prototype.markSlowNode = function (node, state, ms) {
+                    if (node.properties['slow]'] > 0)
+                        return;
+                    node.properties['slow'] = ms;
                 };
                 Canvas2DRenderer.prototype._renderLayer = function (node, state) {
                     var layer = node.getLayer();
@@ -58332,6 +58575,69 @@ var Shumway;
                         var paintStencil = !node.hasFlags(16 /* CacheAsBitmap */) || !mask.hasFlags(16 /* CacheAsBitmap */);
                         this._renderWithMask(node, mask, layer.blendMode, paintStencil, state);
                     }
+                };
+                Canvas2DRenderer.prototype._renderLayerWithCache = function (node, state) {
+                    var layer = node.getLayer();
+                    var colorMatrix = state.colorMatrix;
+                    var useFilters = this._options.filters && (layer.filters && layer.filters.length > 0 || colorMatrix && !colorMatrix.isIdentity());
+                    var blendMode = this._options.blending ? layer.blendMode : BlendMode.Normal;
+                    var mask = this._options.blending ? layer.mask : null;
+                    var boundsAABB = Rectangle.allocate();
+                    boundsAABB.set(node.getLayerBounds(useFilters));
+                    state.matrix.transformRectangleAABB(boundsAABB);
+                    boundsAABB.snap();
+                    var clip = Rectangle.allocate();
+                    clip.set(boundsAABB);
+                    clip.intersect(state.clip);
+                    clip.snap();
+                    if (clip.isEmpty()) {
+                        return;
+                    }
+                    var target = node.properties['cacheSurface'] || null;
+                    if (target) {
+                        if (GFX.ENABLE_LAYERS_CACHE && node.updateID === node.dirtyUpdateID
+                            && target.surface !== state.target.surface) {
+                            node.renderID = this.frameCounter;
+                            state.target.draw(target, clip.x, clip.y, target.region.w, target.region.h, null, blendMode, null, this._devicePixelRatio);
+                            clip.free();
+                            boundsAABB.free();
+                            return;
+                        }
+                        else {
+                            target.free();
+                        }
+                    }
+                    else {
+                        this._allocatedLayers.push(node);
+                    }
+                    target = this._allocateSurface(clip.w, clip.h, state.target.surface);
+                    node.properties['cacheSurface'] = target;
+                    node.updateID = node.dirtyUpdateID;
+                    if (mask) {
+                        //TODO: mask
+                        var paintStencil = !node.hasFlags(16 /* CacheAsBitmap */) || !mask.hasFlags(16 /* CacheAsBitmap */);
+                        this._renderWithMask(node, mask, layer.blendMode, paintStencil, state);
+                    }
+                    else if (useFilters) {
+                        var target2 = this._allocateSurface(clip.w, clip.h, target.surface);
+                        this._renderToTemporarySurfaceEx(node, state, target2, clip);
+                        var clip2 = Rectangle.allocate();
+                        clip2.setElements(target.region.x, target.region.y, clip.w, clip.h);
+                        target.enterClip(clip2);
+                        target.clear();
+                        target.draw(target2, clip2.x, clip2.y, clip2.w, clip2.h, colorMatrix, BlendMode.Normal, layer.filters, this._devicePixelRatio);
+                        target.exitClip();
+                        target2.free();
+                        clip2.free();
+                    }
+                    else {
+                        // just render to the target
+                        this._renderToTemporarySurfaceEx(node, state, target, clip);
+                    }
+                    node.renderID = this.frameCounter;
+                    state.target.draw(target, clip.x, clip.y, clip.w, clip.h, null, blendMode, null, this._devicePixelRatio);
+                    clip.free();
+                    boundsAABB.free();
                 };
                 Canvas2DRenderer.prototype._renderWithMask = function (node, mask, blendMode, stencil, state) {
                     var maskMatrix = mask.getTransform().getConcatenatedMatrix(true);
@@ -58398,6 +58704,9 @@ var Shumway;
                     if (this._options.cacheShapes) {
                         state.flags |= 256 /* CacheShapes */;
                     }
+                    if (this._options.perfRender) {
+                        state.flags |= 32768 /* PerfRender */;
+                    }
                     if (this._options.imageSmoothing) {
                         state.flags |= 4096 /* ImageSmoothing */;
                     }
@@ -58423,28 +58732,34 @@ var Shumway;
                     var region = target.region;
                     // Region bounds may be smaller than the allocated surface region.
                     var surfaceRegionBounds = new Rectangle(region.x, region.y, clip.w, clip.h);
-                    target.context.setTransform(1, 0, 0, 1, 0, 0);
-                    target.clear();
+                    target.enterClip(surfaceRegionBounds);
                     matrix = matrix.clone();
                     matrix.translate(surfaceRegionBounds.x - clip.x, surfaceRegionBounds.y - clip.y);
-                    // Clip region bounds so we don't paint outside.
-                    target.context.save();
-                    // We can't do this because we could be clipping some other temporary region in the same
-                    // context.
-                    // TODO: but we have to, otherwise we overwrite textures that we might need. This happens in
-                    // _renderWithMask, which is why we currently force the allocation of a whole second surface
-                    // to avoid it. So, we need to find a solution here.
-                    //target.context.beginPath();
-                    //target.context.rect(surfaceRegionBounds.x, surfaceRegionBounds.y, surfaceRegionBounds.w,
-                    //                    surfaceRegionBounds.h);
-                    //target.context.clip();
                     state = state.clone();
                     state.target = target;
                     state.matrix = matrix;
                     state.clip.set(surfaceRegionBounds);
                     node.visit(this, state);
                     state.free();
-                    target.context.restore();
+                    target.exitClip();
+                    return target;
+                };
+                Canvas2DRenderer.prototype._renderToTemporarySurfaceEx = function (node, state, target, clip) {
+                    // Region bounds may be smaller than the allocated surface region.
+                    var region = target.region;
+                    var matrix = state.matrix;
+                    var surfaceRegionBounds = new Rectangle(region.x, region.y, clip.w, clip.h);
+                    target.surface.enterClip(target, surfaceRegionBounds);
+                    target.clear();
+                    matrix = matrix.clone();
+                    matrix.translate(surfaceRegionBounds.x - clip.x, surfaceRegionBounds.y - clip.y);
+                    state = state.clone();
+                    state.target = target;
+                    state.matrix = matrix;
+                    state.clip.set(surfaceRegionBounds);
+                    node.visit(this, state);
+                    state.free();
+                    target.surface.exitClip();
                     return target;
                 };
                 Canvas2DRenderer.prototype._allocateSurface = function (w, h, excludeSurface) {
@@ -59255,6 +59570,7 @@ var Shumway;
             GFX.GFXChannelSerializer = GFXChannelSerializer;
             var GFXChannelDeserializerContext = /** @class */ (function () {
                 function GFXChannelDeserializerContext(easelHost, root, transparent) {
+                    this.readCounter = 0;
                     var stage = this.stage = new Stage(128, 512);
                     if (typeof registerInspectorStage !== "undefined") {
                         registerInspectorStage(stage);
@@ -59384,6 +59700,7 @@ var Shumway;
                         requestBitmapData: 0,
                         decodeImage: 0
                     };
+                    this.context.readCounter++;
                     Shumway.GFX.enterTimeline("GFXChannelDeserializer.read", data);
                     while (input.bytesAvailable > 0) {
                         tag = input.readInt();
@@ -59654,64 +59971,71 @@ var Shumway;
                 GFXChannelDeserializer.prototype._readFilters = function (node) {
                     var input = this.input;
                     var count = input.readInt();
-                    var filters = [];
-                    if (count) {
-                        for (var i = 0; i < count; i++) {
-                            var type = input.readInt();
-                            switch (type) {
-                                case Remoting.FilterType.Blur:
-                                    filters.push(new BlurFilter(input.readFloat(), // blurX
-                                    input.readFloat(), // blurY
-                                    input.readInt() // quality
-                                    ));
-                                    break;
-                                case Remoting.FilterType.DropShadow:
-                                    filters.push(new DropshadowFilter(input.readFloat(), // alpha
-                                    input.readFloat(), // angle
-                                    input.readFloat(), // blurX
-                                    input.readFloat(), // blurY
-                                    input.readInt(), // color
-                                    input.readFloat(), // distance
-                                    input.readBoolean(), // hideObject
-                                    input.readBoolean(), // inner
-                                    input.readBoolean(), // knockout
-                                    input.readInt(), // quality
-                                    input.readFloat() // strength
-                                    ));
-                                    break;
-                                case Remoting.FilterType.ColorMatrix:
-                                    var matrix = new Float32Array(20);
-                                    matrix[0] = input.readFloat();
-                                    matrix[4] = input.readFloat();
-                                    matrix[8] = input.readFloat();
-                                    matrix[12] = input.readFloat();
-                                    matrix[16] = input.readFloat() / 255;
-                                    matrix[1] = input.readFloat();
-                                    matrix[5] = input.readFloat();
-                                    matrix[9] = input.readFloat();
-                                    matrix[13] = input.readFloat();
-                                    matrix[17] = input.readFloat() / 255;
-                                    ;
-                                    matrix[2] = input.readFloat();
-                                    matrix[6] = input.readFloat();
-                                    matrix[10] = input.readFloat();
-                                    matrix[14] = input.readFloat();
-                                    matrix[18] = input.readFloat() / 255;
-                                    ;
-                                    matrix[3] = input.readFloat();
-                                    matrix[7] = input.readFloat();
-                                    matrix[11] = input.readFloat();
-                                    matrix[15] = input.readFloat();
-                                    matrix[19] = input.readFloat() / 255;
-                                    filters.push(new ColorMatrix(matrix));
-                                    break;
-                                default:
-                                    Shumway.Debug.somewhatImplemented(Remoting.FilterType[type]);
-                                    break;
+                    if (!count) {
+                        if (node._layer) {
+                            var layer = node.getLayer();
+                            if (layer.filters && layer.filters.length > 0) {
+                                layer.filters = [];
                             }
                         }
-                        node.getLayer().filters = filters;
+                        return;
                     }
+                    var filters = [];
+                    for (var i = 0; i < count; i++) {
+                        var type = input.readInt();
+                        switch (type) {
+                            case Remoting.FilterType.Blur:
+                                filters.push(new BlurFilter(input.readFloat(), // blurX
+                                input.readFloat(), // blurY
+                                input.readInt() // quality
+                                ));
+                                break;
+                            case Remoting.FilterType.DropShadow:
+                                filters.push(new DropshadowFilter(input.readFloat(), // alpha
+                                input.readFloat(), // angle
+                                input.readFloat(), // blurX
+                                input.readFloat(), // blurY
+                                input.readInt(), // color
+                                input.readFloat(), // distance
+                                input.readBoolean(), // hideObject
+                                input.readBoolean(), // inner
+                                input.readBoolean(), // knockout
+                                input.readInt(), // quality
+                                input.readFloat() // strength
+                                ));
+                                break;
+                            case Remoting.FilterType.ColorMatrix:
+                                var matrix = new Float32Array(20);
+                                matrix[0] = input.readFloat();
+                                matrix[4] = input.readFloat();
+                                matrix[8] = input.readFloat();
+                                matrix[12] = input.readFloat();
+                                matrix[16] = input.readFloat() / 255;
+                                matrix[1] = input.readFloat();
+                                matrix[5] = input.readFloat();
+                                matrix[9] = input.readFloat();
+                                matrix[13] = input.readFloat();
+                                matrix[17] = input.readFloat() / 255;
+                                ;
+                                matrix[2] = input.readFloat();
+                                matrix[6] = input.readFloat();
+                                matrix[10] = input.readFloat();
+                                matrix[14] = input.readFloat();
+                                matrix[18] = input.readFloat() / 255;
+                                ;
+                                matrix[3] = input.readFloat();
+                                matrix[7] = input.readFloat();
+                                matrix[11] = input.readFloat();
+                                matrix[15] = input.readFloat();
+                                matrix[19] = input.readFloat() / 255;
+                                filters.push(new ColorMatrix(matrix));
+                                break;
+                            default:
+                                Shumway.Debug.somewhatImplemented(Remoting.FilterType[type]);
+                                break;
+                        }
+                    }
+                    node.getLayer().filters = filters;
                 };
                 GFXChannelDeserializer.prototype._readUpdateFrame = function () {
                     var input = this.input;
@@ -59723,6 +60047,7 @@ var Shumway;
                     if (!node) {
                         node = context._nodes[id] = new Group();
                     }
+                    node.dirtyUpdateID = this.context.readCounter;
                     var hasBits = input.readInt();
                     if (hasBits & 1 /* HasMatrix */) {
                         node.getTransform().setMatrix(this._readMatrix());
@@ -60994,7 +61319,8 @@ var Shumway;
                     var roots = this.roots;
                     for (var i = 0; i < roots.length; i++) {
                         Shumway.Player.enterTimeline("remoting references");
-                        this.writeDirtyDisplayObjects(roots[i], true);
+                        //this.writeDirtyDisplayObjects(roots[i], true);
+                        this.writeDirtyDisplayObjectsWithLayers(roots[i]);
                         Shumway.Player.leaveTimeline("remoting references");
                     }
                 };
@@ -61005,11 +61331,11 @@ var Shumway;
                  * Serializes dirty display objects starting at the specified root |displayObject| node.
                  */
                 PlayerChannelSerializer.prototype.writeDirtyDisplayObjects = function (displayObject, clearDirtyDescendentsFlag) {
-                    var self = this;
+                    var _this = this;
                     var roots = this.roots;
                     displayObject.visit(function (displayObject) {
                         if (displayObject._hasAnyDirtyFlags(1023 /* Dirty */)) {
-                            self.writeUpdateFrame(displayObject);
+                            _this.writeUpdateFrame(displayObject);
                             // Collect more roots?
                             if (roots && displayObject.mask) {
                                 var root = displayObject.mask._findFurthestAncestorOrSelf();
@@ -61017,7 +61343,7 @@ var Shumway;
                             }
                         }
                         // TODO: Checking if we need to write assets this way is kinda expensive, do better here.
-                        self.writeDirtyAssets(displayObject);
+                        _this.writeDirtyAssets(displayObject);
                         var hasDirtyDescendents = displayObject._hasFlags(536870912 /* DirtyDescendents */);
                         if (hasDirtyDescendents) {
                             if (clearDirtyDescendentsFlag) {
@@ -61026,8 +61352,44 @@ var Shumway;
                             }
                             return 0 /* Continue */;
                         }
-                        // We can skip visiting descendents since they are not dirty.
                         return 2 /* Skip */;
+                    }, 0 /* None */);
+                };
+                /**
+                 * Serializes dirty display objects starting at the specified root |displayObject| node.
+                 * Also serializes all layers
+                 */
+                PlayerChannelSerializer.prototype.writeDirtyDisplayObjectsWithLayers = function (displayObject) {
+                    var _this = this;
+                    var roots = this.roots;
+                    var badFlags = 1023 /* Dirty */ & ~2 /* DirtyChildren */;
+                    displayObject._removeFlags(1073741824 /* DirtyParents */);
+                    displayObject.visit(function (displayObject) {
+                        var dirtyParents = displayObject._hasAnyDirtyFlags(badFlags) ||
+                            displayObject._parent && displayObject._parent._hasFlags(1073741824 /* DirtyParents */);
+                        if (dirtyParents) {
+                            displayObject._setFlags(1073741824 /* DirtyParents */);
+                        }
+                        else {
+                            displayObject._removeFlags(1073741824 /* DirtyParents */);
+                        }
+                        if (displayObject._hasAnyDirtyFlags(1023 /* Dirty */)) {
+                            _this.writeUpdateFrame(displayObject);
+                            // Collect more roots?
+                            if (roots && displayObject.mask) {
+                                var root = displayObject.mask._findFurthestAncestorOrSelf();
+                                Shumway.ArrayUtilities.pushUnique(roots, root);
+                            }
+                        }
+                        else if ((dirtyParents || displayObject._hasFlags(536870912 /* DirtyDescendents */))
+                            && (displayObject._blendMode !== flash.display.BlendMode.NORMAL ||
+                                displayObject._filters && displayObject._filters.length > 0 ||
+                                displayObject._mask)) {
+                            _this.writeUpdateFrame(displayObject);
+                        }
+                        _this.writeDirtyAssets(displayObject);
+                        displayObject._removeFlags(536870912 /* DirtyDescendents */);
+                        return 0 /* Continue */;
                     }, 0 /* None */);
                 };
                 PlayerChannelSerializer.prototype.writeStage = function (stage) {

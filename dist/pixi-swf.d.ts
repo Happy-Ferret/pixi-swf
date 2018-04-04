@@ -2297,6 +2297,7 @@ declare module Shumway.flash.system {
     function checkParameterType(argument: any, name: string, type: LegacyClass): void;
     class LegacyClass<T extends LegacyEntity = any> extends LegacyEntity {
         key: string;
+        multiname: lang.Multiname;
         jsClass: Function;
         constructor(jsClass: Function);
         create(args?: Array<any>): T;
@@ -4550,7 +4551,7 @@ declare module Shumway.flash.lang {
     let nativeClassLoaderNames: Array<NativeClassLoaderName>;
     function registerNativeClass(name: string, asClass: LegacyClass, alias?: string, nsType?: NamespaceType): void;
     function registerNativeFunction(path: string, fun: Function): void;
-    function createLegacyClass(name: Multiname, proto: LegacyClass): LegacyClass<any>;
+    function createLegacyClass(name: Multiname, proto: LegacyClass): any;
     function getNativeClass(name: Multiname): any;
 }
 declare module Shumway {
@@ -6116,6 +6117,10 @@ declare module Shumway.flash.display {
          * subtree need to be synchronized.
          */
         DirtyDescendents = 536870912,
+        /**
+         * Used for serialization of layers
+         */
+        DirtyParents = 1073741824,
         /**
          * Masks flags that need to be propagated up when this display object gets added to a parent.
          */
@@ -10712,7 +10717,7 @@ declare module Shumway.flash.system {
     class ApplicationDomain extends LegacyEntity implements lang.IApplicationDomain {
         loadABC(file: Shumway.flash.lang.ABCFile): void;
         loadAndExecuteABC(file: Shumway.flash.lang.ABCFile): void;
-        getClass(name: Multiname, namespaceType: NamespaceType): LegacyClass;
+        getClass(name: Multiname, namespaceType?: NamespaceType): LegacyClass;
         addClass(entry: {
             name: Multiname;
             value: LegacyClass;
@@ -11253,6 +11258,7 @@ declare module Shumway.flash.text {
         static instanceSymbols: string[];
         _symbol: TextSymbol;
         applySymbol(): void;
+        preInit(): void;
         constructor();
         _canHaveTextContent(): boolean;
         _getTextContent(): Shumway.TextContent;
@@ -11350,6 +11356,7 @@ declare module Shumway.flash.text {
     class TextField extends flash.display.InteractiveObject {
         _symbol: TextSymbol;
         applySymbol(): void;
+        preInit(): void;
         constructor();
         protected _initializeFields(): void;
         _setFillAndLineBoundsFromSymbol(symbol: Timeline.DisplaySymbol): void;
@@ -14259,6 +14266,12 @@ declare module Shumway.GFX {
          * This nodes stack level.
          */
         depth: number;
+        /**
+         * Used to track changes
+         */
+        dirtyUpdateID: number;
+        renderID: number;
+        updateID: number;
         protected _eventListeners: {
             type: NodeEventType;
             listener: (node: Node, type?: NodeEventType) => void;
@@ -14594,7 +14607,7 @@ declare module Shumway.GFX {
          * If specified, the rectangular |cullBounds| can be used to cull parts of the shape for better performance.
          * If |paintStencil| is |true| then we must not create any alpha values, and also not paint any strokes.
          */
-        render(context: CanvasRenderingContext2D, ratio: number, cullBounds?: Shumway.GFX.Geometry.Rectangle, clipPath?: Path2D, paintStencil?: boolean): void;
+        render(context: CanvasRenderingContext2D, ratio: number, cullBounds?: Shumway.GFX.Geometry.Rectangle, clipPath?: Path2D, paintStencil?: boolean, fillAdditive?: boolean): void;
     }
     class CustomRenderable extends Renderable {
         constructor(bounds: Rectangle, render: (context: CanvasRenderingContext2D, ratio: number, cullBounds: Shumway.GFX.Geometry.Rectangle) => void);
@@ -14675,6 +14688,7 @@ declare module Shumway.GFX {
         smoothImage: boolean;
         strokeProperties: StrokeProperties;
         path: Path2D;
+        shareBorder: boolean;
         constructor(type: PathType, style: any, smoothImage: boolean, strokeProperties: StrokeProperties);
     }
     class StrokeProperties {
@@ -14705,8 +14719,8 @@ declare module Shumway.GFX {
          * If |paintStencil| is |true| then we must not create any alpha values, and also not paint
          * any strokes.
          */
-        render(context: CanvasRenderingContext2D, ratio: number, cullBounds: Rectangle, clipPath?: Path2D, paintStencil?: boolean): void;
-        protected _deserializePaths(data: ShapeData, context: CanvasRenderingContext2D, ratio: number): StyledPath[];
+        render(context: CanvasRenderingContext2D, ratio: number, cullBounds: Rectangle, clipPath?: Path2D, paintStencil?: boolean, fillAdditive?: boolean): void;
+        protected _deserializePaths(data: ShapeData, context: CanvasRenderingContext2D, ratio: number, checkBorder?: boolean): StyledPath[];
         private _createPath(type, style, smoothImage, strokeProperties, x, y);
         private _readMatrix(data);
         private _readGradient(styles, context);
@@ -14926,6 +14940,20 @@ declare module Shumway.GFX.Canvas2D {
         reset(): void;
         fill(fillStyle: any): void;
         clear(rectangle?: Rectangle): void;
+        enterClip(rect?: Rectangle): void;
+        exitClip(): void;
+    }
+    class SurfaceClipState {
+        target: Canvas2DSurfaceRegion;
+        rect: Rectangle;
+        states: Array<RenderState>;
+        constructor();
+        enter(): void;
+        leave(): void;
+        applyClipPath(state: RenderState): void;
+        closeClipPath(): void;
+        startClipRect(rect: Rectangle): void;
+        finishClipRect(): void;
     }
     class Canvas2DSurface implements ISurface {
         w: number;
@@ -14936,7 +14964,22 @@ declare module Shumway.GFX.Canvas2D {
         constructor(canvas: HTMLCanvasElement, regionAllocator?: RegionAllocator.IRegionAllocator);
         allocate(w: number, h: number): Canvas2DSurfaceRegion;
         free(surfaceRegion: Canvas2DSurfaceRegion): void;
+        /**
+         * CLIP STACK STATE !@#$ YOU CANVAS2D
+         */
+        clipStates: Array<SurfaceClipState>;
+        clipStateNum: number;
+        enterClip(region: Canvas2DSurfaceRegion, rect?: Rectangle): void;
+        exitClip(): void;
+        applyClipPath(state: RenderState): void;
+        closeClipPath(): void;
     }
+}
+declare module Shumway.GFX {
+    let PERF_SHAPE_MS: number;
+    let PERF_LAYER_MS: number;
+    let PERF_SHOW_SLOW: boolean;
+    let ENABLE_LAYERS_CACHE: boolean;
 }
 declare module Shumway.GFX.Canvas2D {
     import Rectangle = Shumway.GFX.Geometry.Rectangle;
@@ -14991,6 +15034,10 @@ declare module Shumway.GFX.Canvas2D {
          */
         cacheShapes: boolean;
         /**
+         * Turn off slow shapes
+         */
+        perfRender: boolean;
+        /**
          * Shapes above this size are not cached.
          */
         cacheShapesMaxSize: number;
@@ -15018,6 +15065,8 @@ declare module Shumway.GFX.Canvas2D {
         PaintDirtyRegion = 2048,
         ImageSmoothing = 4096,
         PixelSnapping = 8192,
+        FillAdditive = 16384,
+        PerfRender = 32768,
     }
     /**
      * Render state.
@@ -15072,7 +15121,12 @@ declare module Shumway.GFX.Canvas2D {
          */
         private static _shapeCache;
         private _visited;
+        /**
+         * stores current number of frame
+         */
+        frameCounter: number;
         private _frameInfo;
+        private _allocatedLayers;
         private _fontSize;
         /**
          * Stack of rendering layers. Stage video lives at the bottom of this stack.
@@ -15091,6 +15145,7 @@ declare module Shumway.GFX.Canvas2D {
          * Main render function.
          */
         render(): void;
+        gc(): void;
         renderNode(node: Node, clip: Rectangle, matrix: Matrix): void;
         renderNodeWithState(node: Node, state: RenderState): void;
         private _renderWithCache(node, state);
@@ -15107,10 +15162,13 @@ declare module Shumway.GFX.Canvas2D {
          */
         visitRenderableVideo(node: RenderableVideo, state: RenderState): void;
         visitRenderable(node: Renderable, state: RenderState, ratio?: number): void;
+        markSlowNode(node: Renderable, state: RenderState, ms: number): void;
         _renderLayer(node: Node, state: RenderState): void;
+        _renderLayerWithCache(node: Node, state: RenderState): void;
         _renderWithMask(node: Node, mask: Node, blendMode: BlendMode, stencil: boolean, state: RenderState): void;
         private _renderStageToTarget(target, node, clip);
         private _renderToTemporarySurface(node, bounds, state, clip, excludeSurface);
+        private _renderToTemporarySurfaceEx(node, state, target, clip);
         private _allocateSurface(w, h, excludeSurface);
         screenShot(bounds: Rectangle, stageContent: boolean, disableHidpi: boolean): ScreenShot;
     }
@@ -15282,6 +15340,7 @@ declare module Shumway.Remoting.GFX {
         _nodes: Node[];
         private _assets;
         _easelHost: Shumway.GFX.EaselHost;
+        readCounter: number;
         private _canvas;
         private _context;
         constructor(easelHost: Shumway.GFX.EaselHost, root: Group, transparent: boolean);
@@ -15662,6 +15721,11 @@ declare module Shumway.Remoting.Player {
          * Serializes dirty display objects starting at the specified root |displayObject| node.
          */
         writeDirtyDisplayObjects(displayObject: DisplayObject, clearDirtyDescendentsFlag: boolean): void;
+        /**
+         * Serializes dirty display objects starting at the specified root |displayObject| node.
+         * Also serializes all layers
+         */
+        writeDirtyDisplayObjectsWithLayers(displayObject: DisplayObject): void;
         writeStage(stage: Stage): void;
         writeCurrentMouseTarget(stage: Stage, currentMouseTarget: flash.display.InteractiveObject): void;
         writeGraphics(graphics: Graphics): void;

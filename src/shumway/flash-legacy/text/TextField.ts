@@ -68,6 +68,13 @@ module Shumway.flash.text {
 			this.autoSize = symbol.autoSize;
 		}
 
+		preInit() {
+			if (this._symbol && !this._fieldsInitialized) {
+				this.applySymbol();
+			}
+			super.preInit();
+		}
+
 		constructor() {
 			super();
 			if (!this._fieldsInitialized) {
@@ -167,7 +174,7 @@ module Shumway.flash.text {
 		}
 
 		private _invalidateContent() {
-			if (this._textContent.flags & Shumway.TextContentFlags.Dirty) {
+			if ((this._textContent.flags & Shumway.TextContentFlags.Dirty) !== 0) {
 				this._setDirtyFlags(DisplayObjectDirtyFlags.DirtyTextContent);
 			}
 		}

@@ -29,7 +29,7 @@ module Shumway.flash.system {
 			// nothing
 		}
 
-		getClass(name: Multiname, namespaceType: NamespaceType): LegacyClass {
+		getClass(name: Multiname, namespaceType?: NamespaceType): LegacyClass {
 			for (let i = 0; i < this._classes.length; i++) {
 				let entry = this._classes[i];
 				if (entry.name.matches(name)) {
@@ -54,7 +54,6 @@ module Shumway.flash.system {
 
 		constructor(parentDomain: any = null) {
 			super();
-			release || Debug.assert(!(this instanceof ApplicationDomain));
 			// this.parentDomain = parentDomain || this._sec.;
 
 			if (parentDomain) {
@@ -113,9 +112,9 @@ module Shumway.flash.system {
 			// if (!name) {
 			// 	this.sec.throwError('TypeError', Errors.NullPointerError, 'definitionName');
 			// }
-			// let simpleName = name.replace("::", ".");
-			// let mn = Multiname.FromFQNString(simpleName, NamespaceType.Public);
-			// return this.axDomain.getProperty(mn, false, false);
+			let simpleName = name.replace("::", ".");
+			let mn = Multiname.FromFQNString(simpleName, NamespaceType.Public);
+			return this.getClass(mn);
 		}
 
 		getQualifiedDefinitionNames(): ArrayLike<any> {

@@ -371,6 +371,14 @@ module Shumway.GFX {
 		 */
 		public depth: number;
 
+		/**
+		 * Used to track changes
+		 */
+		public dirtyUpdateID: number;
+
+		public renderID: number;
+		public updateID: number;
+
 		protected _eventListeners: {
 			type: NodeEventType;
 			listener: (node: Node, type?: NodeEventType) => void;
@@ -1058,10 +1066,10 @@ module Shumway.GFX {
 
 		set filters(value: Filter []) {
 			this._filters = value;
-			if (value.length) {
+			// if (value.length !== this._filters.length) {
 				// TODO: We could avoid invalidating the node if the new filter list contains equal filter objects.
 				this._node.invalidate();
-			}
+			// }
 		}
 
 		get blendMode() {

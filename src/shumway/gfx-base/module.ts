@@ -604,6 +604,7 @@ module Shumway.GFX {
 				// If we scale square 1x1 using this transform, it will fit into a
 				// rectangular area, that has sides parallel to the x- and y-axis,
 				// (a + c) x (d + b).
+
 				switch (lineScaleMode) {
 					case LineScaleMode.None:
 						break;
@@ -621,6 +622,7 @@ module Shumway.GFX {
 						this.lineWidth = clamp(oldLineWidth * scaleWidth, MIN_LINE_WIDTH, MAX_LINE_WIDTH);
 						break;
 				}
+
 				// Stroke and restore the previous matrix.
 				this.stroke(transformedPath);
 				this.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
@@ -655,6 +657,8 @@ module Shumway.GFX {
 							return this._currentTransform || (this._currentTransform = Geometry.Matrix.createIdentitySVGMatrix());
 						}
 					});
+					//@ivanpopelyshev: this polyfill breaks everything. Do not use it!
+					//hasCurrentTransform = true;
 				}
 			}
 

@@ -128,7 +128,8 @@ module Shumway {
 			this._wordWrap = false;
 			this._scrollV = 1;
 			this._scrollH = 0;
-			this.flags = TextContentFlags.None;
+			//this.flags = TextContentFlags.None;
+			this.flags = TextContentFlags.DirtyContent;
 			this.defaultTextFormat = defaultTextFormat || sec.text.TextFormat.create();
 			this.textRuns = [];
 			this.textRunData = new DataBuffer();
@@ -515,6 +516,7 @@ module Shumway {
 			this._plainText = plainText + newText;
 			this.textRuns.push(newRun);
 			this._writeTextRun(newRun);
+			this.flags |= TextContentFlags.DirtyContent;
 		}
 
 		prependText(newText: string, format?: flash.text.TextFormat) {

@@ -31,6 +31,13 @@ module Shumway.flash.text {
 			this._setStaticContentFromSymbol(this._symbol);
 		}
 
+		preInit() {
+			if (this._symbol && !this._fieldsInitialized) {
+				this.applySymbol();
+			}
+			super.preInit();
+		}
+
 		constructor() {
 			super();
 			if (!this._fieldsInitialized) {

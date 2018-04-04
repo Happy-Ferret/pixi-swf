@@ -335,7 +335,6 @@ module Shumway.GFX.Canvas2D {
 				sx = source.region.x;
 				sy = source.region.y;
 			}
-			let canvas = this.context.canvas;
 			let clip = blendModeShouldClip(blendMode);
 			if (clip) {
 				this.context.save();
@@ -344,7 +343,7 @@ module Shumway.GFX.Canvas2D {
 				this.context.clip();
 			}
 			this.context.globalAlpha = 1;
-			this.context.globalCompositeOperation = getCompositeOperation(blendMode);
+			this.context.globalCompositeOperation = getCompositeOperation(BlendMode.Normal);
 
 			if (filters) {
 				if (colorMatrix && !colorMatrix.isIdentity()) {
@@ -361,6 +360,8 @@ module Shumway.GFX.Canvas2D {
 						_cc = copyContext;
 						copyContext = sourceContext;
 						sourceContext = _cc;
+						dx = source.region.x;
+						dy = source.region.y;
 					} else {
 						Canvas2DSurfaceRegion._ensureCopyCanvasSize(w, h);
 						copyContext = Canvas2DSurfaceRegion._copyCanvasContext;
@@ -368,7 +369,7 @@ module Shumway.GFX.Canvas2D {
 						dy = 0;
 					}
 					for (; i < filters.length - 1; i++) {
-						copyContext.clearRect(0, 0, w, h);
+						copyContext.clearRect(dx, dy, w, h);
 						Filters._applyFilter(devicePixelRatio, copyContext, filters[i]);
 						copyContext.drawImage(sourceContext.canvas, sx, sy, w, h, dx, dy, w, h);
 						Filters._removeFilter(copyContext);
@@ -388,6 +389,7 @@ module Shumway.GFX.Canvas2D {
 				Filters._applyFilter(devicePixelRatio, this.context, filters[i]);
 			}
 
+			this.context.globalCompositeOperation = getCompositeOperation(blendMode);
 			this.context.drawImage(sourceContext.canvas, sx, sy, w, h, x, y, w, h);
 
 			this.context.globalCompositeOperation = getCompositeOperation(BlendMode.Normal);
@@ -428,6 +430,79 @@ module Shumway.GFX.Canvas2D {
 			}
 			context.clearRect(rectangle.x, rectangle.y, rectangle.w, rectangle.h);
 		}
+
+		public enterClip(rect?: Rectangle) {
+			this.surface.enterClip(this, rect);
+		}
+
+		public exitClip() {
+			this.surface.exitClip();
+		}
+	}
+
+	//surface clip!
+	export class SurfaceClipState {
+		target: Canvas2DSurfaceRegion;
+		rect: Rectangle = null;
+		states: Array<RenderState> = [];
+
+		constructor() {
+		}
+
+		enter() {
+			const context = this.target.surface.context;
+			context.save();
+			this.target.reset();
+			if (this.rect) {
+				context.save();
+				context.beginPath();
+				context.rect(this.rect.x, this.rect.y, this.rect.w, this.rect.h);
+				context.clip();
+			}
+			for (let i=0;i<this.states.length;i++) {
+				context.save();
+				this.states[i].applyClipPath();
+			}
+		}
+
+		leave() {
+			const context = this.target.surface.context;
+			for (let i=0;i<this.states.length;i++) {
+				context.restore();
+			}
+			if (this.rect) {
+				context.restore();
+			}
+			context.restore();
+		}
+
+		applyClipPath(state: RenderState) {
+			const context = this.target.surface.context;
+			context.save();
+			this.states.push(state);
+			state.applyClipPath();
+		}
+
+		closeClipPath() {
+			const context = this.target.surface.context;
+			context.restore();
+			this.states.pop();
+		}
+
+		startClipRect(rect: Rectangle) {
+			const context = this.target.surface.context;
+			this.rect = rect;
+			context.save();
+			context.beginPath();
+			context.rect(this.rect.x, this.rect.y, this.rect.w, this.rect.h);
+			context.clip();
+		}
+
+		finishClipRect() {
+			const context = this.target.surface.context;
+			this.rect = null;
+			context.restore();
+		}
 	}
 
 	export class Canvas2DSurface implements ISurface {
@@ -455,6 +530,52 @@ module Shumway.GFX.Canvas2D {
 
 		free(surfaceRegion: Canvas2DSurfaceRegion) {
 			this._regionAllocator.free(surfaceRegion.region);
+		}
+
+		/**
+		 * CLIP STACK STATE !@#$ YOU CANVAS2D
+		 */
+
+		clipStates: Array<SurfaceClipState> = [];
+		clipStateNum = -1;
+
+		enterClip(region: Canvas2DSurfaceRegion, rect?: Rectangle) {
+			let stack = this.clipStates;
+			if (this.clipStateNum >=0) {
+				stack[this.clipStateNum].leave();
+			}
+			this.clipStateNum++;
+			if (this.clipStateNum >= stack.length ) {
+				stack.push(new SurfaceClipState());
+			}
+			const elem = stack[this.clipStateNum];
+			elem.target = region;
+			elem.rect = rect;
+			elem.enter();
+		}
+
+		exitClip() {
+			let stack = this.clipStates;
+			const elem = stack[this.clipStateNum];
+			elem.leave();
+			elem.rect = null;
+			elem.target = null;
+			this.clipStateNum--;
+			if (this.clipStateNum >=0 ){
+				stack[this.clipStateNum].enter();
+			}
+		}
+
+		applyClipPath(state: RenderState) {
+			let stack = this.clipStates;
+			const elem = stack[this.clipStateNum];
+			elem.applyClipPath(state);
+		}
+
+		closeClipPath() {
+			let stack = this.clipStates;
+			const elem = stack[this.clipStateNum];
+			elem.closeClipPath();
 		}
 	}
 }

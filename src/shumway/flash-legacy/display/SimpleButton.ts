@@ -237,7 +237,8 @@ module Shumway.flash.display {
 			let result = target._containsGlobalPoint(globalX, globalY, testingType, objects);
 			target._parent = null;
 			// For mouse target finding, SimpleButtons always return themselves as the hit.
-			if (result !== HitTestingResult.None && testingType === HitTestingType.Mouse &&
+			/*@ivanpopelyshev: result !== HitTestingResult.NONE, why? */
+			if (result === HitTestingResult.Shape && testingType === HitTestingType.Mouse &&
 				objects && this._mouseEnabled) {
 				objects[0] = this;
 				release || assert(objects.length === 1);
@@ -290,6 +291,7 @@ module Shumway.flash.display {
 			} else {
 				this._children.length = 0;
 			}
+			this._setFlags(DisplayObjectFlags.DirtyDescendents)
 			this._setDirtyFlags(DisplayObjectDirtyFlags.DirtyChildren);
 			this._invalidateFillAndLineBounds(true, true);
 		}

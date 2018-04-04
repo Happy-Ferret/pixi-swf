@@ -12,6 +12,7 @@ module Shumway.flash {
 }
 
 module Shumway.flash.system {
+
 	export class LegacyNamespace extends LegacyEntity {
 		key: string = null;
 
@@ -34,6 +35,7 @@ module Shumway.flash.system {
 
 	export class LegacyClass<T extends LegacyEntity = any> extends LegacyEntity {
 		key: string = null;
+		multiname: lang.Multiname = null;
 
 		jsClass: Function;
 
@@ -97,7 +99,7 @@ module Shumway.flash.system {
 		}
 
 		isSymbolPrototype(symbolClass: any) {
-			return this.jsClass.prototype.isPrototypeOf(symbolClass.jsClass.jsClass);
+			return this.jsClass.prototype.isPrototypeOf(symbolClass.jsClass);
 		}
 
 		FromUntyped(obj: any): T {

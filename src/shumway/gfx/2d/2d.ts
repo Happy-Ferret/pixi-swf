@@ -1,3 +1,10 @@
+module Shumway.GFX {
+	export let PERF_SHAPE_MS = 1000000;
+	export let PERF_LAYER_MS = 1000000;
+	export let PERF_SHOW_SLOW = false;
+	export let ENABLE_LAYERS_CACHE = true;
+}
+
 module Shumway.GFX.Canvas2D {
 
 	import assert = Shumway.Debug.assert;
@@ -15,6 +22,7 @@ module Shumway.GFX.Canvas2D {
 	import epsilonEquals = Shumway.NumberUtilities.epsilonEquals;
 
 	import ISurfaceRegionAllocator = SurfaceRegionAllocator.ISurfaceRegionAllocator;
+	import DisplayObjectDirtyFlags = Shumway.flash.display.DisplayObjectDirtyFlags;
 
 	declare let registerScratchCanvas: any;
 
@@ -66,27 +74,20 @@ module Shumway.GFX.Canvas2D {
 				let scaledBounds = bounds.clone();
 				scaledBounds.scale(scale, scale);
 				scaledBounds.snap();
-				let surfaceRegion: Canvas2DSurfaceRegion = <any>this._surfaceRegionAllocator.allocate(scaledBounds.w, scaledBounds.h, null);
+				let surfaceRegion: Canvas2DSurfaceRegion = <any>this._surfaceRegionAllocator.allocate(scaledBounds.w + 2, scaledBounds.h + 2, null);
 				// surfaceRegion.fill(ColorStyle.randomStyle());
 				let region = surfaceRegion.region;
 				mipLevel = this._levels[levelIndex] = new MipMapLevel(surfaceRegion, scale);
-				let surface = <Canvas2D.Canvas2DSurface>(mipLevel.surfaceRegion.surface);
-				let context = surface.context;
-
-//        context.save();
-//        context.beginPath();
-//        context.rect(region.x, region.y, region.w, region.h);
-//        context.clip();
-//        context.setTransform(scale, 0, 0, scale, region.x - scaledBounds.x, region.y - scaledBounds.y);
+				surfaceRegion.enterClip(region);
 
 				let state = new RenderState(surfaceRegion);
 				state.clip.set(region);
-				state.matrix.setElements(scale, 0, 0, scale, region.x - scaledBounds.x, region.y - scaledBounds.y);
-				state.flags |= RenderFlags.IgnoreNextRenderWithCache;
+				state.matrix.setElements(scale, 0, 0, scale, region.x + 1 - scaledBounds.x, region.y + 1 - scaledBounds.y);
+				state.flags |= RenderFlags.IgnoreNextRenderWithCache | RenderFlags.FillAdditive;
 				this._renderer.renderNodeWithState(this._node, state);
 				state.free();
 
-				// context.restore();
+				surfaceRegion.exitClip();
 			}
 			return mipLevel;
 		}
@@ -135,6 +136,11 @@ module Shumway.GFX.Canvas2D {
 		cacheShapes: boolean = false;
 
 		/**
+		 * Turn off slow shapes
+		 */
+		perfRender: boolean = true;
+
+		/**
 		 * Shapes above this size are not cached.
 		 */
 		cacheShapesMaxSize: number = 256;
@@ -165,7 +171,9 @@ module Shumway.GFX.Canvas2D {
 		PaintBounds = 0x0400,
 		PaintDirtyRegion = 0x0800,
 		ImageSmoothing = 0x1000,
-		PixelSnapping = 0x2000
+		PixelSnapping = 0x2000,
+		FillAdditive = 0x4000,
+		PerfRender = 0x8000
 	}
 
 	let MAX_VIEWPORT = Rectangle.createMaxI16();
@@ -331,7 +339,13 @@ module Shumway.GFX.Canvas2D {
 
 		private _visited: number = 0;
 
+		/**
+		 * stores current number of frame
+		 */
+		public frameCounter = 0;
+
 		private _frameInfo = new FrameInfo();
+		private _allocatedLayers : Array<Node> = [];
 
 		private _fontSize: number = 0;
 
@@ -474,15 +488,19 @@ module Shumway.GFX.Canvas2D {
 			let viewport = this._viewport;
 
 			// stage.visit(new TracingNodeVisitor(new IndentingWriter()), null);
-
-			target.reset();
 			target.context.save();
 
-			target.context.beginPath();
-			target.context.rect(viewport.x, viewport.y, viewport.w, viewport.h);
-			target.context.clip();
+			target.reset();
+
+			target.enterClip(viewport);
+
+			this.frameCounter++;
 
 			this._renderStageToTarget(target, stage, viewport);
+
+			target.exitClip();
+
+			this.gc();
 
 			target.reset();
 
@@ -495,6 +513,21 @@ module Shumway.GFX.Canvas2D {
 			}
 
 			target.context.restore();
+		}
+
+		public gc() {
+			let all = this._allocatedLayers;
+			let j = 0;
+			for (let i=0;i<all.length;i++) {
+				const node = all[i];
+				if (node.properties['cacheSurface'] && all[i].renderID === this.frameCounter) {
+					all[j++] = node;
+				} else {
+					node.properties['cacheSurface'].free();
+					node.properties['cacheSurface'] = null;
+				}
+			}
+			all.length = j;
 		}
 
 		public renderNode(node: Node, clip: Rectangle, matrix: Matrix) {
@@ -550,11 +583,13 @@ module Shumway.GFX.Canvas2D {
 			if (mipMapLevel) {
 				let context = state.target.context;
 				context.imageSmoothingEnabled = context.mozImageSmoothingEnabled = true;
+				context.globalAlpha = 1;
+				context.globalCompositeOperation = 'source-over';
 				context.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
 				context.drawImage(
 					mipMapLevelSurfaceRegion.surface.canvas,
-					region.x, region.y,
-					region.w, region.h,
+					region.x + 1, region.y + 1,
+					region.w - 2, region.h - 2,
 					bounds.x, bounds.y,
 					bounds.w, bounds.h
 				);
@@ -605,7 +640,7 @@ module Shumway.GFX.Canvas2D {
 				state = state.clone();
 				state.flags |= RenderFlags.IgnoreNextLayer;
 				state.clipList = [];
-				this._renderLayer(node, state);
+				this._renderLayerWithCache(node, state);
 				state.free();
 			} else {
 				if (ignoreNextLayer) {
@@ -634,6 +669,7 @@ module Shumway.GFX.Canvas2D {
 							clipState.flags |= RenderFlags.PaintClip;
 							clipState.beginClipPath(transform.getMatrix());
 							child.visit(this, clipState);
+
 							clipState.applyClipPath();
 							clipState.free();
 						} else {
@@ -800,17 +836,23 @@ module Shumway.GFX.Canvas2D {
 			let videoLayer = this._backgroundVideoLayer;
 			if (videoLayer !== node.video.parentElement) {
 				videoLayer.appendChild(node.video);
-				node.addEventListener(NodeEventType.RemovedFromStage, function removeVideo(node: RenderableVideo) {
+				let removeVideo = (node: any /*RenderableVideo*/) => {
 					release || assert(videoLayer === node.video.parentElement);
 					videoLayer.removeChild(node.video);
 					node.removeEventListener(NodeEventType.RemovedFromStage, removeVideo);
-				});
+				}
+				node.addEventListener(NodeEventType.RemovedFromStage, removeVideo);
 			}
 			matrix.free();
 		}
 
 		visitRenderable(node: Renderable, state: RenderState, ratio?: number) {
 			let bounds = node.getBounds();
+
+			if (node.properties['slow'] && !PERF_SHOW_SLOW ||
+				!node.properties['slow'] && PERF_SHOW_SLOW) {
+				return;
+			}
 
 			if (state.flags & RenderFlags.IgnoreRenderable) {
 				return;
@@ -819,11 +861,25 @@ module Shumway.GFX.Canvas2D {
 				return;
 			}
 
+
+			let perfRender = !release && !!(state.flags & RenderFlags.PerfRender);
+			let paintStart = 0;
+
 			if (state.hasFlags(RenderFlags.IgnoreNextRenderWithCache)) {
 				state.removeFlags(RenderFlags.IgnoreNextRenderWithCache);
 			} else {
-				if (this._renderWithCache(node, state)) {
+				if (perfRender) {
+					paintStart = performance.now();
+				}
+				const isCached = this._renderWithCache(node, state);
+				if (isCached) {
 					return;
+				}
+				if (perfRender) {
+					let elapsed = performance.now() - paintStart;
+					if (elapsed > PERF_SHAPE_MS) {
+						this.markSlowNode(node, state, elapsed);
+					}
 				}
 			}
 
@@ -835,8 +891,7 @@ module Shumway.GFX.Canvas2D {
 
 			context.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
 
-			let paintStart = 0;
-			if (paintFlashing) {
+			if (paintFlashing || perfRender) {
 				paintStart = performance.now();
 			}
 
@@ -848,17 +903,35 @@ module Shumway.GFX.Canvas2D {
 			let cacheShapesMaxSize = this._options.cacheShapesMaxSize;
 
 			node.properties["renderCount"] = ++renderCount;
-			node.render(context, ratio, null, paintClip ? state.clipPath : null, paintStencil);
-			if (paintFlashing) {
+
+			let additive = state.hasFlags(RenderFlags.FillAdditive);
+
+			node.render(context, ratio, null, paintClip ? state.clipPath : null, paintStencil, additive);
+
+			if (paintFlashing || perfRender) {
 				let elapsed = performance.now() - paintStart;
-				context.fillStyle = ColorStyle.gradientColor(0.1 / elapsed);
-				context.globalAlpha = 0.3 + 0.1 * Math.random();
-				context.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+
+				if (elapsed > PERF_SHAPE_MS) {
+					this.markSlowNode(node, state, elapsed);
+				}
+
+				if (paintFlashing) {
+					context.fillStyle = ColorStyle.gradientColor(0.1 / elapsed);
+					context.globalAlpha = 0.3 + 0.1 * Math.random();
+					context.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+				}
 			}
+		}
+
+		markSlowNode(node: Renderable, state: RenderState, ms: number) {
+			if (node.properties['slow]'] > 0) return;
+			node.properties['slow'] = ms;
 		}
 
 		_renderLayer(node: Node, state: RenderState) {
 			let layer = node.getLayer();
+
+
 			let mask = layer.mask;
 			if (!mask) {
 				let clip = Rectangle.allocate();
@@ -875,6 +948,78 @@ module Shumway.GFX.Canvas2D {
 				let paintStencil = !node.hasFlags(NodeFlags.CacheAsBitmap) || !mask.hasFlags(NodeFlags.CacheAsBitmap);
 				this._renderWithMask(node, mask, layer.blendMode, paintStencil, state);
 			}
+		}
+
+		_renderLayerWithCache(node: Node, state: RenderState) {
+			let layer = node.getLayer();
+
+			let colorMatrix = state.colorMatrix;
+			let useFilters = this._options.filters && (layer.filters && layer.filters.length > 0 || colorMatrix && !colorMatrix.isIdentity());
+			let blendMode = this._options.blending ? layer.blendMode : BlendMode.Normal;
+			let mask = this._options.blending ? layer.mask : null;
+
+			let boundsAABB = Rectangle.allocate();
+			boundsAABB.set(node.getLayerBounds(useFilters));
+			state.matrix.transformRectangleAABB(boundsAABB);
+			boundsAABB.snap();
+
+			let clip = Rectangle.allocate();
+			clip.set(boundsAABB);
+			clip.intersect(state.clip);
+			clip.snap();
+
+			if (clip.isEmpty()) {
+				return;
+			}
+
+			let target : Canvas2DSurfaceRegion = node.properties['cacheSurface'] || null;
+			if (target) {
+				if (GFX.ENABLE_LAYERS_CACHE && node.updateID === node.dirtyUpdateID
+					&& target.surface !== state.target.surface) {
+					node.renderID = this.frameCounter;
+					state.target.draw(target, clip.x, clip.y, target.region.w, target.region.h, null, blendMode, null, this._devicePixelRatio);
+
+					clip.free();
+					boundsAABB.free();
+					return;
+				}
+				else {
+					target.free();
+				}
+			} else {
+				this._allocatedLayers.push(node);
+			}
+
+			target = this._allocateSurface(clip.w, clip.h, state.target.surface);
+			node.properties['cacheSurface'] = target;
+			node.updateID = node.dirtyUpdateID;
+
+			if (mask) {
+				//TODO: mask
+				let paintStencil = !node.hasFlags(NodeFlags.CacheAsBitmap) || !mask.hasFlags(NodeFlags.CacheAsBitmap);
+				this._renderWithMask(node, mask, layer.blendMode, paintStencil, state);
+			} else if (useFilters) {
+				let target2 = this._allocateSurface(clip.w, clip.h, target.surface);
+				this._renderToTemporarySurfaceEx(node, state, target2, clip);
+				let clip2 = Rectangle.allocate();
+				clip2.setElements(target.region.x, target.region.y, clip.w, clip.h);
+				target.enterClip(clip2);
+				target.clear();
+				target.draw(target2, clip2.x,clip2.y, clip2.w, clip2.h, colorMatrix,
+					BlendMode.Normal, layer.filters, this._devicePixelRatio);
+				target.exitClip();
+				target2.free();
+				clip2.free();
+			} else {
+				// just render to the target
+				this._renderToTemporarySurfaceEx(node, state, target, clip);
+			}
+
+			node.renderID = this.frameCounter;
+			state.target.draw(target, clip.x, clip.y, clip.w, clip.h, null, blendMode, null, this._devicePixelRatio);
+
+			clip.free();
+			boundsAABB.free();
 		}
 
 		_renderWithMask(node: Node, mask: Node, blendMode: BlendMode, stencil: boolean, state: RenderState) {
@@ -959,6 +1104,9 @@ module Shumway.GFX.Canvas2D {
 			if (this._options.cacheShapes) {
 				state.flags |= RenderFlags.CacheShapes;
 			}
+			if (this._options.perfRender) {
+				state.flags |= RenderFlags.PerfRender;
+			}
 			if (this._options.imageSmoothing) {
 				state.flags |= RenderFlags.ImageSmoothing;
 			}
@@ -994,7 +1142,32 @@ module Shumway.GFX.Canvas2D {
 			// Region bounds may be smaller than the allocated surface region.
 			let surfaceRegionBounds = new Rectangle(region.x, region.y, clip.w, clip.h);
 
-			target.context.setTransform(1, 0, 0, 1, 0, 0);
+			target.enterClip(surfaceRegionBounds);
+
+			matrix = matrix.clone();
+
+			matrix.translate(
+				surfaceRegionBounds.x - clip.x,
+				surfaceRegionBounds.y - clip.y
+			);
+
+			state = state.clone();
+			state.target = target;
+			state.matrix = matrix;
+			state.clip.set(surfaceRegionBounds);
+			node.visit(this, state);
+			state.free();
+			target.exitClip();
+			return target;
+		}
+
+		private _renderToTemporarySurfaceEx(node: Node, state: RenderState, target: Canvas2DSurfaceRegion, clip: Rectangle) {
+			// Region bounds may be smaller than the allocated surface region.
+			let region = target.region;
+			let matrix = state.matrix;
+			let surfaceRegionBounds = new Rectangle(region.x, region.y, clip.w, clip.h);
+
+			target.surface.enterClip(target, surfaceRegionBounds);
 			target.clear();
 
 			matrix = matrix.clone();
@@ -1004,26 +1177,13 @@ module Shumway.GFX.Canvas2D {
 				surfaceRegionBounds.y - clip.y
 			);
 
-			// Clip region bounds so we don't paint outside.
-			target.context.save();
-
-			// We can't do this because we could be clipping some other temporary region in the same
-			// context.
-			// TODO: but we have to, otherwise we overwrite textures that we might need. This happens in
-			// _renderWithMask, which is why we currently force the allocation of a whole second surface
-			// to avoid it. So, we need to find a solution here.
-			//target.context.beginPath();
-			//target.context.rect(surfaceRegionBounds.x, surfaceRegionBounds.y, surfaceRegionBounds.w,
-			//                    surfaceRegionBounds.h);
-			//target.context.clip();
-
 			state = state.clone();
 			state.target = target;
 			state.matrix = matrix;
 			state.clip.set(surfaceRegionBounds);
 			node.visit(this, state);
 			state.free();
-			target.context.restore();
+			target.surface.exitClip();
 			return target;
 		}
 

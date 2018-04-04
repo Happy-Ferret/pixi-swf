@@ -27,14 +27,19 @@ module Shumway.flash.lang {
 	}
 
 	export function createLegacyClass(name: Multiname, proto: LegacyClass) {
-		function symbolClass() {
+		var symbolClass: any = function() {
 			proto.jsClass.apply(this, arguments);
-		}
+		};
+
+		symbolClass.multiname = name;
+
+		LegacyClass.call(symbolClass, symbolClass);
+		(Object as any).assign(symbolClass, LegacyClass.prototype);
 
 		symbolClass.prototype = Object.create(proto.jsClass.prototype);
 		symbolClass.prototype.constructor = symbolClass;
 
-		return new LegacyClass(symbolClass);
+		return symbolClass;
 	}
 
 	export function getNativeClass(name: Multiname) {

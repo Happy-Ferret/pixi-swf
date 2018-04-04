@@ -96,6 +96,7 @@ module Shumway.Remoting.GFX {
 		private _assets: Renderable [];
 
 		_easelHost: Shumway.GFX.EaselHost;
+		readCounter: number = 0;
 		private _canvas: HTMLCanvasElement;
 		private _context: CanvasRenderingContext2D;
 
@@ -226,7 +227,6 @@ module Shumway.Remoting.GFX {
 		inputAssets: any[];
 		output: DataBuffer;
 		context: GFXChannelDeserializerContext;
-
 		/**
 		 * Used to avoid extra allocation, don't ever leak a reference to this object.
 		 */
@@ -261,6 +261,9 @@ module Shumway.Remoting.GFX {
 				requestBitmapData: 0,
 				decodeImage: 0
 			};
+
+			this.context.readCounter++;
+
 			Shumway.GFX.enterTimeline("GFXChannelDeserializer.read", data);
 			while (input.bytesAvailable > 0) {
 				tag = input.readInt();
@@ -547,66 +550,73 @@ module Shumway.Remoting.GFX {
 		private _readFilters(node: Node) {
 			let input = this.input;
 			let count = input.readInt();
-			let filters = [];
-			if (count) {
-				for (let i = 0; i < count; i++) {
-					let type: FilterType = input.readInt();
-					switch (type) {
-						case FilterType.Blur:
-							filters.push(new BlurFilter(
-								input.readFloat(), // blurX
-								input.readFloat(), // blurY
-								input.readInt()    // quality
-							));
-							break;
-						case FilterType.DropShadow:
-							filters.push(new DropshadowFilter(
-								input.readFloat(),   // alpha
-								input.readFloat(),   // angle
-								input.readFloat(),   // blurX
-								input.readFloat(),   // blurY
-								input.readInt(),     // color
-								input.readFloat(),   // distance
-								input.readBoolean(), // hideObject
-								input.readBoolean(), // inner
-								input.readBoolean(), // knockout
-								input.readInt(),     // quality
-								input.readFloat()    // strength
-							));
-							break;
-						case FilterType.ColorMatrix:
-							let matrix = new Float32Array(20);
-							matrix[0] = input.readFloat();
-							matrix[4] = input.readFloat();
-							matrix[8] = input.readFloat();
-							matrix[12] = input.readFloat();
-							matrix[16] = input.readFloat() / 255;
-							matrix[1] = input.readFloat();
-							matrix[5] = input.readFloat();
-							matrix[9] = input.readFloat();
-							matrix[13] = input.readFloat();
-							matrix[17] = input.readFloat() / 255;
-							;
-							matrix[2] = input.readFloat();
-							matrix[6] = input.readFloat();
-							matrix[10] = input.readFloat();
-							matrix[14] = input.readFloat();
-							matrix[18] = input.readFloat() / 255;
-							;
-							matrix[3] = input.readFloat();
-							matrix[7] = input.readFloat();
-							matrix[11] = input.readFloat();
-							matrix[15] = input.readFloat();
-							matrix[19] = input.readFloat() / 255;
-							filters.push(new ColorMatrix(matrix));
-							break;
-						default:
-							Shumway.Debug.somewhatImplemented(FilterType[type]);
-							break;
+			if (!count) {
+				if ((node as any)._layer) {
+					const layer = node.getLayer();
+					if (layer.filters && layer.filters.length > 0) {
+						layer.filters = [];
 					}
 				}
-				node.getLayer().filters = filters;
+				return;
 			}
+			let filters = [];
+			for (let i = 0; i < count; i++) {
+				let type: FilterType = input.readInt();
+				switch (type) {
+					case FilterType.Blur:
+						filters.push(new BlurFilter(
+							input.readFloat(), // blurX
+							input.readFloat(), // blurY
+							input.readInt()    // quality
+						));
+						break;
+					case FilterType.DropShadow:
+						filters.push(new DropshadowFilter(
+							input.readFloat(),   // alpha
+							input.readFloat(),   // angle
+							input.readFloat(),   // blurX
+							input.readFloat(),   // blurY
+							input.readInt(),     // color
+							input.readFloat(),   // distance
+							input.readBoolean(), // hideObject
+							input.readBoolean(), // inner
+							input.readBoolean(), // knockout
+							input.readInt(),     // quality
+							input.readFloat()    // strength
+						));
+						break;
+					case FilterType.ColorMatrix:
+						let matrix = new Float32Array(20);
+						matrix[0] = input.readFloat();
+						matrix[4] = input.readFloat();
+						matrix[8] = input.readFloat();
+						matrix[12] = input.readFloat();
+						matrix[16] = input.readFloat() / 255;
+						matrix[1] = input.readFloat();
+						matrix[5] = input.readFloat();
+						matrix[9] = input.readFloat();
+						matrix[13] = input.readFloat();
+						matrix[17] = input.readFloat() / 255;
+						;
+						matrix[2] = input.readFloat();
+						matrix[6] = input.readFloat();
+						matrix[10] = input.readFloat();
+						matrix[14] = input.readFloat();
+						matrix[18] = input.readFloat() / 255;
+						;
+						matrix[3] = input.readFloat();
+						matrix[7] = input.readFloat();
+						matrix[11] = input.readFloat();
+						matrix[15] = input.readFloat();
+						matrix[19] = input.readFloat() / 255;
+						filters.push(new ColorMatrix(matrix));
+						break;
+					default:
+						Shumway.Debug.somewhatImplemented(FilterType[type]);
+						break;
+				}
+			}
+			node.getLayer().filters = filters;
 		}
 
 		private _readUpdateFrame() {
@@ -619,6 +629,8 @@ module Shumway.Remoting.GFX {
 			if (!node) {
 				node = context._nodes[id] = new Group();
 			}
+			node.dirtyUpdateID = this.context.readCounter;
+
 			let hasBits = input.readInt();
 			if (hasBits & MessageBits.HasMatrix) {
 				node.getTransform().setMatrix(this._readMatrix());

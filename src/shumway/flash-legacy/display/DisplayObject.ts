@@ -195,6 +195,11 @@ module Shumway.flash.display {
 		DirtyDescendents = 0x20000000,
 
 		/**
+		 * Used for serialization of layers
+		 */
+		DirtyParents = 0x40000000,
+
+		/**
 		 * Masks flags that need to be propagated up when this display object gets added to a parent.
 		 */
 		Bubbling = ContainsFrameScriptPendingChildren | ContainsMorph | DirtyDescendents
@@ -1017,8 +1022,8 @@ module Shumway.flash.display {
 		_animate(placeObjectTag: Shumway.SWF.Parser.PlaceObjectTag): void {
 			release || assert(this._hasFlags(DisplayObjectFlags.AnimatedByTimeline));
 
-			let reset = !(placeObjectTag.flags & PlaceObjectFlags.Move) &&
-				placeObjectTag.flags & PlaceObjectFlags.HasCharacter;
+			let reset = (placeObjectTag.flags & PlaceObjectFlags.Move) === 0 &&
+				(placeObjectTag.flags & PlaceObjectFlags.HasCharacter) !== 0;
 
 			let matrixClass = this._sec.geom;
 			if (placeObjectTag.flags & PlaceObjectFlags.HasMatrix) {

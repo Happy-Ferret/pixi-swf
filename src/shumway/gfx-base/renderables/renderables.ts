@@ -166,7 +166,7 @@ module Shumway.GFX {
 		 * If |paintStencil| is |true| then we must not create any alpha values, and also not paint any strokes.
 		 */
 		render(context: CanvasRenderingContext2D, ratio: number, cullBounds?: Shumway.GFX.Geometry.Rectangle,
-		       clipPath?: Path2D, paintStencil?: boolean): void {
+		       clipPath?: Path2D, paintStencil?: boolean, fillAdditive?: boolean): void {
 
 		}
 	}
@@ -640,10 +640,12 @@ module Shumway.GFX {
 
 	export class StyledPath {
 		path: Path2D;
+		shareBorder: boolean;
 
 		constructor(public type: PathType, public style: any, public smoothImage: boolean,
 		            public strokeProperties: StrokeProperties) {
 			this.path = new Path2D();
+			this.shareBorder = false;
 			release || assert((type === PathType.Stroke ||
 				type === PathType.StrokeFill) === !!strokeProperties);
 		}
@@ -665,6 +667,28 @@ module Shumway.GFX {
 			morph(start >> 16 & 0xff, end >> 16 & 0xff, ratio) << 16 |
 			morph(start >> 8 & 0xff, end >> 8 & 0xff, ratio) << 8 |
 			morph(start & 0xff, end & 0xff, ratio);
+	}
+
+	let tempCoordinateMap: { [key: string]: number } = {};
+
+	function clearPointMap() {
+		tempCoordinateMap = {};
+	}
+
+	function checkPointMap(x: number, y: number, newVal: number) {
+		let key = x+"#"+y;
+		let val = tempCoordinateMap[key];
+		if (val === undefined)
+		{
+			tempCoordinateMap[key] = newVal;
+			return false;
+		}
+		if (val === newVal)
+		{
+			return false;
+		}
+		tempCoordinateMap[key] = newVal;
+		return true;
 	}
 
 	export class RenderableShape extends Renderable {
@@ -714,11 +738,11 @@ module Shumway.GFX {
 		 * any strokes.
 		 */
 		render(context: CanvasRenderingContext2D, ratio: number, cullBounds: Rectangle,
-		       clipPath: Path2D = null, paintStencil: boolean = false): void {
+		       clipPath: Path2D = null, paintStencil: boolean = false, fillAdditive = false): void {
 			let paintStencilStyle = release ? '#000000' : '#FF4981';
 			context.fillStyle = context.strokeStyle = 'transparent';
 
-			let paths = this._deserializePaths(this._pathData, context, ratio);
+			let paths = this._deserializePaths(this._pathData, context, ratio, fillAdditive);
 			release || assert(paths);
 
 			enterTimeline("RenderableShape.render", this);
@@ -731,9 +755,15 @@ module Shumway.GFX {
 					if (clipPath) {
 						clipPath.addPath(path.path, (<any>context).currentTransform);
 					} else {
+						if (fillAdditive && path.shareBorder) {
+							context.globalCompositeOperation = 'lighter';
+						}
 						context.fillStyle = paintStencil ? paintStencilStyle : path.style;
 						context.fill(path.path, 'evenodd');
 						context.fillStyle = 'transparent';
+						if (fillAdditive && path.shareBorder) {
+							context.globalCompositeOperation = 'source-over';
+						}
 					}
 				} else if (!clipPath && !paintStencil) {
 					context.strokeStyle = path.style;
@@ -766,11 +796,12 @@ module Shumway.GFX {
 					context.strokeStyle = 'transparent';
 				}
 			}
+			context.globalCompositeOperation = 'source-over'
 			leaveTimeline("RenderableShape.render");
 		}
 
 		protected _deserializePaths(data: ShapeData, context: CanvasRenderingContext2D,
-		                            ratio: number): StyledPath[] {
+		                            ratio: number, checkBorder?: boolean): StyledPath[] {
 			release || assert(data ? !this._paths : this._paths);
 			enterTimeline("RenderableShape.deserializePaths");
 			// TODO: Optimize path handling to use only one path if possible.
@@ -784,7 +815,13 @@ module Shumway.GFX {
 			let paths: Array<StyledPath> = this._paths = [];
 
 			let fillPath: Path2D = null;
+			let fillStyled: StyledPath = null;
 			let strokePath: Path2D = null;
+			let fillNumber = 0;
+
+			if (checkBorder) {
+				clearPointMap();
+			}
 
 			// We have to alway store the last position because Flash keeps the drawing cursor where it
 			// was when changing fill or line style, whereas Canvas forgets it on beginning a new path.
@@ -805,6 +842,8 @@ module Shumway.GFX {
 			let commandIndex;
 			for (commandIndex = 0; commandIndex < commandsCount; commandIndex++) {
 				let command = commands[commandIndex];
+				let readX = 0;
+				let readY = 0;
 				switch (command) {
 					case PathCommand.MoveTo:
 						release || assert(coordinatesIndex <= data.coordinatesPosition - 2);
@@ -813,15 +852,19 @@ module Shumway.GFX {
 							strokePath && strokePath.lineTo(formOpenX, formOpenY);
 						}
 						formOpen = true;
-						x = formOpenX = coordinates[coordinatesIndex++] / 20;
-						y = formOpenY = coordinates[coordinatesIndex++] / 20;
+						readX = coordinates[coordinatesIndex++];
+						readY = coordinates[coordinatesIndex++];
+						x = formOpenX = readX / 20;
+						y = formOpenY = readY / 20;
 						fillPath && fillPath.moveTo(x, y);
 						strokePath && strokePath.moveTo(x, y);
 						break;
 					case PathCommand.LineTo:
 						release || assert(coordinatesIndex <= data.coordinatesPosition - 2);
-						x = coordinates[coordinatesIndex++] / 20;
-						y = coordinates[coordinatesIndex++] / 20;
+						readX = coordinates[coordinatesIndex++];
+						readY = coordinates[coordinatesIndex++];
+						x = readX / 20;
+						y = readY / 20;
 						fillPath && fillPath.lineTo(x, y);
 						strokePath && strokePath.lineTo(x, y);
 						break;
@@ -829,8 +872,10 @@ module Shumway.GFX {
 						release || assert(coordinatesIndex <= data.coordinatesPosition - 4);
 						cpX = coordinates[coordinatesIndex++] / 20;
 						cpY = coordinates[coordinatesIndex++] / 20;
-						x = coordinates[coordinatesIndex++] / 20;
-						y = coordinates[coordinatesIndex++] / 20;
+						readX = coordinates[coordinatesIndex++];
+						readY = coordinates[coordinatesIndex++];
+						x = readX / 20;
+						y = readY / 20;
 						fillPath && fillPath.quadraticCurveTo(cpX, cpY, x, y);
 						strokePath && strokePath.quadraticCurveTo(cpX, cpY, x, y);
 						break;
@@ -840,25 +885,33 @@ module Shumway.GFX {
 						cpY = coordinates[coordinatesIndex++] / 20;
 						let cpX2 = coordinates[coordinatesIndex++] / 20;
 						let cpY2 = coordinates[coordinatesIndex++] / 20;
-						x = coordinates[coordinatesIndex++] / 20;
-						y = coordinates[coordinatesIndex++] / 20;
+						readX = coordinates[coordinatesIndex++];
+						readY = coordinates[coordinatesIndex++];
+						x = readX / 20;
+						y = readY / 20;
 						fillPath && fillPath.bezierCurveTo(cpX, cpY, cpX2, cpY2, x, y);
 						strokePath && strokePath.bezierCurveTo(cpX, cpY, cpX2, cpY2, x, y);
 						break;
 					case PathCommand.BeginSolidFill:
 						release || assert(styles.bytesAvailable >= 4);
-						fillPath = this._createPath(PathType.Fill,
+						fillStyled = this._createPath(PathType.Fill,
 							ColorUtilities.rgbaToCSSStyle(styles.readUnsignedInt()),
 							false, null, x, y);
+						fillPath = fillStyled.path;
+						fillNumber++;
 						break;
 					case PathCommand.BeginBitmapFill:
 						let bitmapStyle = this._readBitmap(styles, context);
-						fillPath = this._createPath(PathType.Fill, bitmapStyle.style, bitmapStyle.smoothImage,
+						fillStyled = this._createPath(PathType.Fill, bitmapStyle.style, bitmapStyle.smoothImage,
 							null, x, y);
+						fillPath = fillStyled.path;
+						fillNumber++;
 						break;
 					case PathCommand.BeginGradientFill:
-						fillPath = this._createPath(PathType.Fill, this._readGradient(styles, context),
+						fillStyled = this._createPath(PathType.Fill, this._readGradient(styles, context),
 							false, null, x, y);
+						fillPath = fillStyled.path;
+						fillNumber++;
 						break;
 					case PathCommand.EndFill:
 						fillPath = null;
@@ -876,14 +929,14 @@ module Shumway.GFX {
 						if (commands[commandIndex + 1] === PathCommand.LineStyleGradient) {
 							commandIndex++;
 							strokePath = this._createPath(PathType.StrokeFill, this._readGradient(styles, context),
-								false, strokeProperties, x, y);
+								false, strokeProperties, x, y).path;
 						} else if (commands[commandIndex + 1] === PathCommand.LineStyleGradient) {
 							commandIndex++;
 							let bitmapStyle = this._readBitmap(styles, context);
 							strokePath = this._createPath(PathType.StrokeFill, bitmapStyle.style,
-								bitmapStyle.smoothImage, strokeProperties, x, y);
+								bitmapStyle.smoothImage, strokeProperties, x, y).path;
 						} else {
-							strokePath = this._createPath(PathType.Stroke, color, false, strokeProperties, x, y);
+							strokePath = this._createPath(PathType.Stroke, color, false, strokeProperties, x, y).path;
 						}
 						break;
 					case PathCommand.LineEnd:
@@ -892,6 +945,12 @@ module Shumway.GFX {
 					default:
 						release || assertUnreachable('Invalid command ' + command + ' encountered at index' +
 							commandIndex + ' of ' + commandsCount);
+				}
+
+				if (fillPath && readX && readY) {
+					if (!strokePath && checkBorder) {
+						fillStyled.shareBorder = checkPointMap(readX, readY, fillNumber) || fillStyled.shareBorder;
+					}
 				}
 			}
 			release || assert(styles.bytesAvailable === 0);
@@ -908,11 +967,11 @@ module Shumway.GFX {
 		}
 
 		private _createPath(type: PathType, style: any, smoothImage: boolean,
-		                    strokeProperties: StrokeProperties, x: number, y: number): Path2D {
+		                    strokeProperties: StrokeProperties, x: number, y: number): StyledPath {
 			let path = new StyledPath(type, style, smoothImage, strokeProperties);
 			this._paths.push(path);
 			path.path.moveTo(x, y);
-			return path.path;
+			return path;
 		}
 
 		private _readMatrix(data: DataBuffer): Matrix {

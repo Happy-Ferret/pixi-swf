@@ -70,7 +70,8 @@ module Shumway.Remoting.Player {
 			let roots = this.roots;
 			for (let i = 0; i < roots.length; i++) {
 				Shumway.Player.enterTimeline("remoting references");
-				this.writeDirtyDisplayObjects(roots[i], true);
+				//this.writeDirtyDisplayObjects(roots[i], true);
+				this.writeDirtyDisplayObjectsWithLayers(roots[i]);
 				Shumway.Player.leaveTimeline("remoting references");
 			}
 		}
@@ -83,11 +84,11 @@ module Shumway.Remoting.Player {
 		 * Serializes dirty display objects starting at the specified root |displayObject| node.
 		 */
 		writeDirtyDisplayObjects(displayObject: DisplayObject, clearDirtyDescendentsFlag: boolean) {
-			let self = this;
 			let roots = this.roots;
-			displayObject.visit(function (displayObject) {
+
+			displayObject.visit((displayObject) => {
 				if (displayObject._hasAnyDirtyFlags(DisplayObjectDirtyFlags.Dirty)) {
-					self.writeUpdateFrame(displayObject);
+					this.writeUpdateFrame(displayObject);
 					// Collect more roots?
 					if (roots && displayObject.mask) {
 						let root = displayObject.mask._findFurthestAncestorOrSelf();
@@ -95,7 +96,7 @@ module Shumway.Remoting.Player {
 					}
 				}
 				// TODO: Checking if we need to write assets this way is kinda expensive, do better here.
-				self.writeDirtyAssets(displayObject);
+				this.writeDirtyAssets(displayObject);
 				let hasDirtyDescendents = displayObject._hasFlags(DisplayObjectFlags.DirtyDescendents);
 				if (hasDirtyDescendents) {
 					if (clearDirtyDescendentsFlag) {
@@ -104,8 +105,45 @@ module Shumway.Remoting.Player {
 					}
 					return VisitorFlags.Continue;
 				}
-				// We can skip visiting descendents since they are not dirty.
 				return VisitorFlags.Skip;
+			}, VisitorFlags.None);
+		}
+
+		/**
+		 * Serializes dirty display objects starting at the specified root |displayObject| node.
+		 * Also serializes all layers
+		 */
+		writeDirtyDisplayObjectsWithLayers(displayObject: DisplayObject) {
+			let roots = this.roots;
+			const badFlags = DisplayObjectDirtyFlags.Dirty & ~DisplayObjectDirtyFlags.DirtyChildren;
+
+			displayObject._removeFlags(DisplayObjectFlags.DirtyParents);
+			displayObject.visit((displayObject)  => {
+				const dirtyParents = displayObject._hasAnyDirtyFlags(badFlags) ||
+					displayObject._parent && displayObject._parent._hasFlags(DisplayObjectFlags.DirtyParents);
+				if (dirtyParents) {
+					displayObject._setFlags(DisplayObjectFlags.DirtyParents);
+				} else {
+					displayObject._removeFlags(DisplayObjectFlags.DirtyParents);
+				}
+
+				if (displayObject._hasAnyDirtyFlags(DisplayObjectDirtyFlags.Dirty)) {
+					this.writeUpdateFrame(displayObject);
+					// Collect more roots?
+					if (roots && displayObject.mask) {
+						let root = displayObject.mask._findFurthestAncestorOrSelf();
+						Shumway.ArrayUtilities.pushUnique(roots, root)
+					}
+				} else if ((dirtyParents || displayObject._hasFlags(DisplayObjectFlags.DirtyDescendents))
+					&& (displayObject._blendMode !== flash.display.BlendMode.NORMAL ||
+						displayObject._filters && displayObject._filters.length > 0 ||
+						displayObject._mask
+					)) {
+					this.writeUpdateFrame(displayObject);
+				}
+				this.writeDirtyAssets(displayObject);
+				displayObject._removeFlags(DisplayObjectFlags.DirtyDescendents);
+				return VisitorFlags.Continue;
 			}, VisitorFlags.None);
 		}
 

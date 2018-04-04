@@ -1,0 +1,7 @@
+*.sublime*
+.DS_Store
+.idea
+.vs_code
+node_modules/
+
+*.tmp
